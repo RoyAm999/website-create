@@ -70,3 +70,9 @@ test("rejects malformed and impossible requested dates", () => {
 test("an email-only requested-date lead is due when the clinic day arrives", () => {
   assert.equal(isDueRequestedContact(lead({ phone: null, email: "dana@example.com" }), now), true);
 });
+
+test("waits for the exact scheduled review time even after the calendar date arrives", () => {
+  assert.equal(isDueRequestedContact(lead({ next_review_at: "2026-09-03T10:00:01Z" }), now), false);
+  assert.equal(isDueRequestedContact(lead({ next_review_at: "2026-09-03T10:00:00Z" }), now), true);
+  assert.equal(isDueRequestedContact(lead({ next_review_at: "not-a-date" }), now), false);
+});

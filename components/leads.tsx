@@ -2,8 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { importLeads, listLeads, listOutcomes, updateLead } from "@/lib/data";
-import { inferStoppedReason, parseCsv } from "@/lib/csv";
+import { importLeadsWithSummary, listLeads, listOutcomes, updateLead } from "@/lib/data";
+import { csvImportErrorMessage, inferStoppedReason, parseCsv } from "@/lib/csv";
 import { hasMedicalEscalation, hasNoContactRequest, hasUnspecifiedAvailabilityConstraint, normalizeEmail, normalizePhone } from "@/lib/lead-safety";
 import { hasConcreteTimingEvidence } from "@/lib/matching";
 import { reportClientError } from "@/lib/report-error";
@@ -51,17 +51,24 @@ function isMedicalLead(lead: Lead) {
   return lead.medical_escalation || lead.status === "medical_review";
 }
 
+function isReviewDeferred(lead: Lead) {
+  if (!lead.next_review_at) return false;
+  const nextReview = Date.parse(lead.next_review_at);
+  return Number.isFinite(nextReview) && nextReview > Date.now();
+}
+
 function displayStatus(lead: Lead, completed = false) {
   if (lead.dnc) return visibleStatus.dnc;
   if (isMedicalLead(lead)) return visibleStatus.medical_review;
   if (lead.needs_fix) return "אין מספיק מידע כדי להחליט";
   if (completed) return "התהליך הושלם";
+  if (isReviewDeferred(lead)) return `נבדוק שוב ב־${formatDate(lead.next_review_at || null)}`;
   return visibleStatus[lead.status];
 }
 
 function LeadCard({ lead, completed, onClick }: { lead: Lead; completed: boolean; onClick: () => void }) {
   const medical = isMedicalLead(lead);
-  const attention = !completed && (lead.needs_fix || medical || attentionStatuses.has(lead.status) || lead.status === "closed");
+  const attention = !completed && !isReviewDeferred(lead) && (lead.needs_fix || medical || attentionStatuses.has(lead.status) || lead.status === "closed");
   return (
     <article className="lead-card">
       <div className="lead-card__identity"><span className="avatar">{lead.name.slice(0, 1)}</span><div><h2>{lead.name}</h2><p>{lead.service}{lead.value_minor ? <> · <bdi dir="ltr">₪&nbsp;{Math.round(lead.value_minor / 100).toLocaleString("he-IL")}</bdi></> : null}</p></div></div>
@@ -77,6 +84,7 @@ function LeadDetail({ lead, completed, onUpdated }: { lead: Lead; completed: boo
   const router = useRouter();
   const { organizationId } = useWorkspace();
   const medical = isMedicalLead(lead);
+  const reviewDeferred = isReviewDeferred(lead);
   const [editing, setEditing] = useState(() => !lead.dnc && !medical && (lead.needs_fix || lead.stopped_reason_code === "unknown"));
   const [name, setName] = useState(lead.name);
   const [phone, setPhone] = useState(lead.phone || "");
@@ -140,7 +148,7 @@ function LeadDetail({ lead, completed, onUpdated }: { lead: Lead; completed: boo
 
   async function blockContact() {
     if (!window.confirm("הפנייה תיחסם ולא תופיע שוב בהמלצות. לחסום?")) return;
-    setBusy(true);
+    setBusy(true); setError("");
     try {
       const updated = await updateLead(getSupabase(), lead.id, { dnc: true });
       onUpdated(updated);
@@ -189,7 +197,8 @@ function LeadDetail({ lead, completed, onUpdated }: { lead: Lead; completed: boo
           {!lead.dnc && !medical && <button className="text-button text-button--inline" onClick={() => setEditing(true)}>תיקון הפרטים</button>}
         </>}
       </section>
-      <section className="detail-section"><span>מה כדאי לעשות עכשיו</span><h2>{completed ? "התהליך הושלם." : medical ? "להעביר לבדיקה רפואית פנימית." : lead.dnc ? "אין ליצור קשר." : lead.needs_fix ? "להשלים את סיבת העצירה." : lead.status === "closed" ? "נשאר לאשר אם התקבלה הכנסה." : visibleStatus[lead.status]}</h2><p>{completed ? "ההכנסה שאושרה מופיעה במסך התוצאות, ואין עוד משימה פתוחה לפנייה הזאת." : medical ? "המערכת לא תציע הודעה ולא תאפשר התקדמות מכירתית. צוות רפואי מוסמך צריך לבדוק את הפנייה מחוץ למסלול המכירה." : lead.dnc ? "אין פעולה זמינה." : todayStatuses.has(lead.status) || lead.status === "closed" ? "הפעולה הבאה מופיעה במסך היום." : lead.status === "watching" ? "להמתין לשינוי אמיתי שרלוונטי לפנייה הזאת." : "אין כרגע פעולה נוספת לפנייה הזאת."}</p>{completed ? <button className="button button--secondary" onClick={() => router.push("/app/results/")}>לראות בתוצאות</button> : !lead.dnc && !medical && (todayStatuses.has(lead.status) || lead.status === "closed") ? <button className="button" onClick={() => router.push(`/app/today/?lead=${lead.id}`)}>פתיחה במסך היום</button> : null}</section>
+      <section className="detail-section"><span>מה כדאי לעשות עכשיו</span><h2>{completed && lead.is_demo ? "תרגול ההחזרה הושלם." : completed ? "התהליך הושלם." : medical ? "להעביר לבדיקה רפואית פנימית." : lead.dnc ? "אין ליצור קשר." : lead.needs_fix ? "להשלים את סיבת העצירה." : reviewDeferred ? `נבדוק שוב ב־${formatDate(lead.next_review_at || null)}.` : lead.status === "closed" ? "נשאר לאשר אם התקבלה הכנסה." : visibleStatus[lead.status]}</h2><p>{completed && lead.is_demo ? "המסלול הושלם לצורך הדגמה. לא מאשרים הכנסה והוא לא נספר כתוצאה של המרפאה." : completed ? "ההכנסה שאושרה מופיעה במסך התוצאות, ואין עוד משימה פתוחה לפנייה הזאת." : medical ? "המערכת לא תציע הודעה ולא תאפשר התקדמות מכירתית. צוות רפואי מוסמך צריך לבדוק את הפנייה מחוץ למסלול המכירה." : lead.dnc ? "אין פעולה זמינה." : reviewDeferred ? "אין צורך לעשות דבר כרגע. הפנייה תחזור למסך היום רק במועד שנקבע או אם יתקבל ממנה עדכון חדש." : todayStatuses.has(lead.status) || lead.status === "closed" ? "הפעולה הבאה מופיעה במסך היום." : lead.status === "watching" ? "להמתין לשינוי אמיתי שרלוונטי לפנייה הזאת." : "אין כרגע פעולה נוספת לפנייה הזאת."}</p>{completed ? <button className="button button--secondary" onClick={() => router.push(lead.is_demo ? "/app/today/" : "/app/results/")}>{lead.is_demo ? "חזרה למסך היום" : "לראות בתוצאות"}</button> : !reviewDeferred && !lead.dnc && !medical && (todayStatuses.has(lead.status) || lead.status === "closed") ? <button className="button" onClick={() => router.push(`/app/today/?lead=${lead.id}`)}>פתיחה במסך היום</button> : null}</section>
+      {error && !editing && <div className="form-error" role="alert">{error}</div>}
       {!lead.dnc && <button className="danger-link" onClick={blockContact} disabled={busy}>סימון “לא ליצור קשר”</button>}
     </div>
   );
@@ -198,7 +207,7 @@ function LeadDetail({ lead, completed, onUpdated }: { lead: Lead; completed: boo
 export function Leads() {
   const router = useRouter();
   const search = useSearchParams();
-  const { organizationId, clinic } = useWorkspace();
+  const { organizationId, clinic, role } = useWorkspace();
   const fileRef = useRef<HTMLInputElement>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
@@ -206,16 +215,25 @@ export function Leads() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState(search.get("filter") || "all");
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"sage" | "warning" | "success">("sage");
+  const [outcomesWarning, setOutcomesWarning] = useState("");
+  const [uploadStage, setUploadStage] = useState<"reading" | "saving" | "refreshing" | null>(null);
+  const [deletingDemo, setDeletingDemo] = useState(false);
 
   const load = useCallback(async () => {
     setStatus("loading");
+    setOutcomesWarning("");
     try {
-      const [nextLeads, nextOutcomes] = await Promise.all([
-        listLeads(getSupabase(), organizationId),
-        listOutcomes(getSupabase(), organizationId),
-      ]);
+      const nextLeads = await listLeads(getSupabase(), organizationId);
       setLeads(nextLeads);
-      setOutcomes(nextOutcomes);
+      try {
+        const nextOutcomes = await listOutcomes(getSupabase(), organizationId);
+        setOutcomes(nextOutcomes);
+      } catch (outcomesError) {
+        reportClientError("leads.outcomes.load", outcomesError, organizationId);
+        setOutcomes([]);
+        setOutcomesWarning("הפניות נטענו, אבל סטטוס התוצאות אינו זמין כרגע. עדיין אפשר לפתוח פנייה ולעדכן את פרטיה.");
+      }
       setStatus("ready");
     }
     catch (loadError) { reportClientError("leads.load", loadError, organizationId); setStatus("error"); }
@@ -223,12 +241,15 @@ export function Leads() {
   useEffect(() => { void load(); }, [load]);
 
   const completedLeadIds = useMemo(() => new Set(
-    outcomes.filter((outcome) => Boolean(outcome.revenue_confirmed_at)).map((outcome) => outcome.lead_id),
-  ), [outcomes]);
+    [
+      ...outcomes.filter((outcome) => Boolean(outcome.revenue_confirmed_at)).map((outcome) => outcome.lead_id),
+      ...leads.filter((lead) => lead.is_demo && lead.status === "closed").map((lead) => lead.id),
+    ],
+  ), [leads, outcomes]);
 
   const filtered = useMemo(() => leads.filter((lead) => {
     const matchesText = !query || `${lead.name} ${lead.service} ${lead.phone || ""} ${lead.email || ""}`.toLowerCase().includes(query.toLowerCase());
-    const needsAttention = !completedLeadIds.has(lead.id) && (lead.needs_fix || isMedicalLead(lead) || attentionStatuses.has(lead.status) || lead.status === "closed");
+    const needsAttention = !completedLeadIds.has(lead.id) && !isReviewDeferred(lead) && (lead.needs_fix || isMedicalLead(lead) || attentionStatuses.has(lead.status) || lead.status === "closed");
     const matchesFilter = filter === "all" || (filter === "attention" && needsAttention) || (filter === "waiting" && lead.status === "waiting");
     return matchesText && matchesFilter;
   }), [completedLeadIds, leads, query, filter]);
@@ -236,24 +257,57 @@ export function Leads() {
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return;
     setNotice("");
+    setUploadStage("reading");
     try {
       const parsed = parseCsv(await file.text(), clinic?.main_service || "");
-      const saved = await importLeads(getSupabase(), organizationId, [...parsed.valid, ...parsed.needsFix]);
-      setNotice(`${saved.length} פניות נקלטו או עודכנו. שום הודעה לא נשלחה.`);
+      setUploadStage("saving");
+      const result = await importLeadsWithSummary(getSupabase(), organizationId, [...parsed.valid, ...parsed.needsFix]);
+      const parts = [
+        result.inserted ? `${result.inserted} חדשות` : "",
+        result.updated ? `${result.updated} עודכנו` : "",
+        result.unchanged ? `${result.unchanged} ללא שינוי` : "",
+      ].filter(Boolean);
+      setNotice(parts.length ? `הייבוא הסתיים: ${parts.join(", ")}. שום הודעה לא נשלחה.` : "הקובץ נבדק ולא נמצאו שינויים לשמירה. שום הודעה לא נשלחה.");
+      setNoticeTone("success");
+      setUploadStage("refreshing");
       await load();
-    } catch (uploadError) { reportClientError("leads.import", uploadError, organizationId); setNotice(uploadError instanceof Error && uploadError.message.startsWith("MISSING_") ? "לא הצלחנו לקרוא את הקובץ. צריך לפחות שם וטלפון או אימייל." : friendlyError(uploadError)); }
-    event.target.value = "";
+    } catch (uploadError) {
+      reportClientError("leads.import", uploadError, organizationId);
+      setNotice(csvImportErrorMessage(uploadError) || friendlyError(uploadError));
+      setNoticeTone("warning");
+    } finally {
+      setUploadStage(null);
+      event.target.value = "";
+    }
   }
 
   async function removeDemo() {
     if (!window.confirm("למחוק רק את 20 פניות הדוגמה? הפניות שהעליתם לא יימחקו.")) return;
-    const { error } = await getSupabase().from("sf_leads").delete().eq("organization_id", organizationId).eq("is_demo", true);
-    if (error) reportClientError("leads.demo.delete", error, organizationId);
-    setNotice(error ? friendlyError(error) : "פניות הדוגמה נמחקו.");
-    if (!error) await load();
+    setDeletingDemo(true);
+    setNotice("");
+    try {
+      const { error, count } = await getSupabase().from("sf_leads").delete({ count: "exact" }).eq("organization_id", organizationId).eq("is_demo", true);
+      if (error) throw error;
+      if (count === null) {
+        const { count: remaining, error: verifyError } = await getSupabase().from("sf_leads").select("id", { count: "exact", head: true }).eq("organization_id", organizationId).eq("is_demo", true);
+        if (verifyError) throw verifyError;
+        if (remaining !== 0) throw new Error("DEMO_DELETE_NOT_CONFIRMED");
+        setNotice("אומת שכל פניות הדוגמה נמחקו.");
+      } else {
+        setNotice(count > 0 ? `${count} פניות דוגמה נמחקו.` : "לא נמצאו פניות דוגמה למחיקה.");
+      }
+      setNoticeTone("success");
+      await load();
+    } catch (deleteError) {
+      reportClientError("leads.demo.delete", deleteError, organizationId);
+      setNotice(friendlyError(deleteError));
+      setNoticeTone("warning");
+    } finally {
+      setDeletingDemo(false);
+    }
   }
 
-  if (status === "loading") return <Spinner label="טוענים את הפניות…" />;
+  if (status === "loading") return <Spinner label={uploadStage === "refreshing" ? "מרעננים את רשימת הפניות…" : "טוענים את הפניות…"} />;
   if (status === "error") return <ErrorState onRetry={load} />;
   const selected = leads.find((lead) => lead.id === search.get("id"));
   if (selected) return <LeadDetail key={selected.id} lead={selected} completed={completedLeadIds.has(selected.id)} onUpdated={(updated) => setLeads((items) => items.map((item) => item.id === updated.id ? updated : item))} />;
@@ -263,11 +317,15 @@ export function Leads() {
   const demoCount = leads.length - realCount;
   const filteredReal = filtered.filter((lead) => !lead.is_demo);
   const filteredDemo = filtered.filter((lead) => lead.is_demo);
+  const canDeleteDemo = role === "owner" || role === "admin";
+  const uploadLabel = uploadStage === "reading" ? "קוראים את הקובץ…" : uploadStage === "saving" ? "שומרים את הפניות…" : uploadStage === "refreshing" ? "מרעננים…" : "הוספת פניות";
   return (
     <div className="leads-page">
-      <header className="list-heading"><div><p>{realCount ? "הפניות במרפאה" : "סביבת תרגול"}</p><h1>{realCount ? `${realCount} פניות במעקב` : `${demoCount} פניות לדוגמה`}</h1></div><div><input ref={fileRef} className="sr-only" type="file" accept=".csv,text/csv" onChange={upload} /><button className="button button--secondary" onClick={() => fileRef.current?.click()}>הוספת פניות</button></div></header>
-      {hasDemo && <div className="demo-strip"><span><b>{demoCount} פניות לדוגמה — תרגול בלבד.</b> הן מסומנות ומופרדות מהפניות ומהתוצאות של המרפאה.</span><button onClick={removeDemo}>מחיקת הדוגמה והעלאת הפניות שלי</button></div>}
-      {notice && <Notice tone={notice.includes("לא הצלחנו") ? "warning" : "sage"}>{notice}</Notice>}
+      <header className="list-heading"><div><p>{realCount ? "הפניות במרפאה" : "סביבת תרגול"}</p><h1>{realCount ? `${realCount} פניות במעקב` : `${demoCount} פניות לדוגמה`}</h1></div><div><input ref={fileRef} className="sr-only" type="file" accept=".csv,text/csv" onChange={upload} disabled={Boolean(uploadStage)} /><button className="button button--secondary" onClick={() => fileRef.current?.click()} disabled={Boolean(uploadStage)} aria-busy={Boolean(uploadStage)}>{uploadLabel}</button></div></header>
+      {hasDemo && <div className="demo-strip"><span><b>{demoCount} פניות לדוגמה — תרגול בלבד.</b> הן מסומנות ומופרדות מהפניות ומהתוצאות של המרפאה.</span>{canDeleteDemo && <button onClick={removeDemo} disabled={deletingDemo} aria-busy={deletingDemo}>{deletingDemo ? "מוחקים…" : "מחיקת פניות הדוגמה"}</button>}</div>}
+      {uploadStage && uploadStage !== "refreshing" && <Notice>{uploadStage === "reading" ? "קוראים ובודקים את הקובץ…" : "שומרים את הפניות בבטחה…"}</Notice>}
+      {notice && <Notice tone={noticeTone}>{notice}</Notice>}
+      {outcomesWarning && <Notice tone="warning">{outcomesWarning}</Notice>}
       {leads.length > 10 && <div className="lead-tools"><label className="search-field"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש לפי שם או שירות" /></label><div className="filter-pills"><button className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")}>דורשות תשומת לב</button><button className={filter === "waiting" ? "active" : ""} onClick={() => setFilter("waiting")}>בהמתנה</button><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>הכול</button></div></div>}
       {filteredReal.length ? <div className="lead-grid">{filteredReal.map((lead) => <LeadCard key={lead.id} lead={lead} completed={completedLeadIds.has(lead.id)} onClick={() => router.push(`/app/leads/?id=${lead.id}`)} />)}</div> : null}
       {filteredDemo.length ? <section className="result-list-section" aria-label="פניות דוגמה"><header><h2>פניות לדוגמה · תרגול בלבד</h2><span>{filteredDemo.length}</span></header><div className="lead-grid">{filteredDemo.map((lead) => <LeadCard key={lead.id} lead={lead} completed={completedLeadIds.has(lead.id)} onClick={() => router.push(`/app/leads/?id=${lead.id}`)} />)}</div></section> : null}

@@ -7,6 +7,7 @@ import {
   approveRecoveryMessage,
   confirmRecoveredRevenue,
   createChangeAndMatch,
+  dismissRecoveryRecommendation,
   deferRecoveryProgress,
   listLeads,
   listMessages,
@@ -23,6 +24,7 @@ import {
 import { reportClientError } from "@/lib/report-error";
 import { dueRequestedContactCount } from "@/lib/priorities";
 import { friendlyError, getSupabase } from "@/lib/supabase";
+import { formatShekelMinor, parseShekelInput } from "@/lib/money";
 import {
   clinicDateInputValue,
   clinicDateTimeInputValue,
@@ -113,6 +115,11 @@ function ChangeForm({ services, branches, initialType, onDone }: { services: str
         setBusy(false);
         return;
       }
+      if (type === "availability" && new Date(end!).getTime() - startDate!.getTime() > 14 * 24 * 60 * 60 * 1000) {
+        setError("חלון זמינות צריך להיות קצר וממוקד — עד 14 יום.");
+        setBusy(false);
+        return;
+      }
       const fallbackDetails = type === "requested_date"
         ? `הגיע ${formatDate(start || new Date().toISOString())}, המועד שבו ביקשו שנחזור`
         : type === "slot" && start
@@ -160,6 +167,7 @@ function ChangeForm({ services, branches, initialType, onDone }: { services: str
   const needsService = type !== "requested_date";
   const needsDate = type === "slot" || type === "availability";
   const minimumFuture = clinicDateTimeInputValue(new Date(Date.now() + 60_000));
+  const maximumAvailability = clinicDateTimeInputValue(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
 
   return (
     <div className="flow-page flow-page--narrow">
@@ -168,7 +176,7 @@ function ChangeForm({ services, branches, initialType, onDone }: { services: str
       <form className="detail-form" onSubmit={submit}>
         {needsService && <label><span>איזה שירות?</span><select value={service} onChange={(event) => setService(event.target.value)} required>{services.map((item) => <option key={item}>{item}</option>)}</select></label>}
         {needsDate && <label><span>מתי?</span><input type="datetime-local" value={startsAt} min={minimumFuture} onChange={(event) => setStartsAt(event.target.value)} required /></label>}
-        {type === "availability" && <label><span>עד מתי?</span><input type="datetime-local" value={endsAt} min={startsAt || minimumFuture} onChange={(event) => setEndsAt(event.target.value)} required /></label>}
+        {type === "availability" && <label><span>עד מתי?</span><input type="datetime-local" value={endsAt} min={startsAt || minimumFuture} max={maximumAvailability} onChange={(event) => setEndsAt(event.target.value)} required /></label>}
         {type === "payment" && <label><span>מה אפשר עכשיו?</span><textarea value={details} onChange={(event) => setDetails(event.target.value)} minLength={4} required placeholder="למשל: אפשר לפרוס ל־4 תשלומים" /></label>}
         {branches.length > 0 && type !== "requested_date" && <label><span>באיזה סניף?</span><select value={branch} onChange={(event) => setBranch(event.target.value)}><option value="">השינוי אינו מוגבל לסניף</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
         {type === "requested_date" && <Notice>נבדוק מול התאריך של היום את הפניות שבהן נשמר מועד חזרה מפורש.</Notice>}
@@ -179,15 +187,16 @@ function ChangeForm({ services, branches, initialType, onDone }: { services: str
   );
 }
 
-function EvidenceCard({ recommendation, onPrepare, busy }: { recommendation: Recommendation; onPrepare: () => void; busy: boolean }) {
+function EvidenceCard({ recommendation, onPrepare, onDismiss, busy }: { recommendation: Recommendation; onPrepare: () => void; onDismiss: () => void; busy: boolean }) {
   const lead = recommendation.lead;
   return (
     <article className="evidence-card">
-      <header><div><h3>{lead?.name || "פנייה"}</h3><p>{lead?.service}</p></div>{lead?.value_minor ? <span>שווי אפשרי · <bdi dir="ltr">₪{Math.round(lead.value_minor / 100).toLocaleString("he-IL")}</bdi></span> : null}</header>
+      <header><div><h3>{lead?.name || "פנייה"}</h3><p>{lead?.service}</p></div>{lead?.is_demo ? <span className="demo-badge">פניית דוגמה</span> : lead?.value_minor ? <span>שווי אפשרי · <bdi dir="ltr">₪{Math.round(lead.value_minor / 100).toLocaleString("he-IL")}</bdi></span> : null}</header>
       <div className="evidence-line evidence-line--then"><span>אז</span><p>“{recommendation.then_text}”</p></div>
       <div className="evidence-line evidence-line--now"><span>עכשיו</span><p>{recommendation.now_text}</p></div>
       <div className="evidence-conclusion"><span>✓</span><div><strong>לכן</strong><p>יש סיבה אמיתית ליצור קשר מחדש.</p></div></div>
       <button className="button button--wide" onClick={onPrepare} disabled={busy}>{busy ? "מכינים…" : "להכין הודעה"}</button>
+      <button className="text-button" type="button" onClick={onDismiss} disabled={busy}>לא מתאים לפנייה הזאת</button>
     </article>
   );
 }
@@ -214,6 +223,19 @@ function MatchReview({ data, changeId, onPrepare }: { data: TodayData; changeId:
     }
   }
 
+  async function dismiss(recommendation: Recommendation) {
+    setPreparingId(recommendation.id);
+    setError("");
+    try {
+      await dismissRecoveryRecommendation(getSupabase(), organizationId, recommendation.id);
+      router.replace("/app/today/?done=dismissed");
+    } catch (dismissError) {
+      reportClientError("today.recommendation.dismiss", dismissError, organizationId);
+      setError(friendlyError(dismissError));
+      setPreparingId("");
+    }
+  }
+
   return (
     <div className="flow-page">
       <PageHeader
@@ -222,7 +244,7 @@ function MatchReview({ data, changeId, onPrepare }: { data: TodayData; changeId:
         description={`${total === 1 ? "בדקנו פנייה אחת." : `בדקנו ${total} פניות.`} ${recommendations.length === 1 ? "היא קשורה לשינוי הזה." : recommendations.length > 1 ? `${recommendations.length} קשורות לשינוי הזה.` : "שום הודעה לא נוצרה."}`}
       />
       {error && <div className="form-error" role="alert">{error}</div>}
-      {recommendations.length ? <div className="evidence-list">{recommendations.map((item) => <EvidenceCard key={item.id} recommendation={item} onPrepare={() => void prepare(item)} busy={preparingId === item.id} />)}</div> : <EmptyState title="עשינו בדיוק את הדבר הנכון." action={<button type="button" className="button button--secondary" onClick={() => router.replace("/app/today/")}>חזרה להיום</button>}><p>השינוי הזה לא מספיק רלוונטי לאף פנייה כרגע.</p><p>לא נפנה לאנשים רק כדי “לנסות”.</p></EmptyState>}
+      {recommendations.length ? <div className="evidence-list">{recommendations.map((item) => <EvidenceCard key={item.id} recommendation={item} onPrepare={() => void prepare(item)} onDismiss={() => void dismiss(item)} busy={Boolean(preparingId)} />)}</div> : <EmptyState title="עשינו בדיוק את הדבר הנכון." action={<button type="button" className="button button--secondary" onClick={() => router.replace("/app/today/")}>חזרה להיום</button>}><p>השינוי הזה לא מספיק רלוונטי לאף פנייה כרגע.</p><p>לא נפנה לאנשים רק כדי “לנסות”.</p></EmptyState>}
     </div>
   );
 }
@@ -233,7 +255,9 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
   const [message, setMessage] = useState<OutreachMessage | null>(initialMessage);
   const [body, setBody] = useState(initialMessage?.body || recommendation?.suggested_message || "");
   const [stage, setStage] = useState<"approve" | "copied" | "sent">(initialMessage?.status === "sent" ? "sent" : initialMessage?.status === "copied" ? "copied" : "approve");
-  const [response, setResponse] = useState(lead.response_text || outcome?.response_text || "");
+  // A previous follow-up reply is historical evidence, not the answer to the
+  // current message. New outreach always starts with an empty response field.
+  const [response, setResponse] = useState("");
   const [showFollowUpDate, setShowFollowUpDate] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [busy, setBusy] = useState(false);
@@ -243,11 +267,19 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const markSentInFlight = useRef(false);
 
+  async function refreshAfterMutationError() {
+    // A request can commit in Postgres while its HTTP response is lost.
+    // Reloading prevents a second click against an already-advanced state.
+    try { await onRefresh(); } catch { /* Keep the local error if refresh also fails. */ }
+  }
+
   async function copyMessage() {
     if (!message) return;
     setBusy(true); setError("");
     setCopyFailed(false);
     try {
+      const saved = await approveRecoveryMessage(getSupabase(), organizationId, message.id, body);
+      setMessage(saved.message);
       let copied = false;
       try {
         if (navigator.clipboard?.writeText) {
@@ -270,27 +302,20 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
         setError("לא הצלחנו להעתיק אוטומטית. הטקסט מסומן — העתיקו אותו ואז לחצו „העתקתי ידנית”.");
         return;
       }
-      const saved = await approveRecoveryMessage(getSupabase(), organizationId, message.id, body);
-      setMessage(saved.message);
       setStage("copied");
-    } catch (saveError) { reportClientError("today.message.copy", saveError, organizationId); setError(friendlyError(saveError)); }
+    } catch (saveError) {
+      reportClientError("today.message.copy", saveError, organizationId);
+      setError(friendlyError(saveError));
+      await refreshAfterMutationError();
+    }
     finally { setBusy(false); }
   }
 
   async function confirmManualCopy() {
     if (!message) return;
-    setBusy(true); setError("");
-    try {
-      const saved = await approveRecoveryMessage(getSupabase(), organizationId, message.id, body);
-      setMessage(saved.message);
-      setCopyFailed(false);
-      setStage("copied");
-    } catch (saveError) {
-      reportClientError("today.message.manual-copy", saveError, organizationId);
-      setError(friendlyError(saveError));
-    } finally {
-      setBusy(false);
-    }
+    setError("");
+    setCopyFailed(false);
+    setStage("copied");
   }
 
   async function markSent(channel: string) {
@@ -310,7 +335,11 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
       setMessage(result.message);
       setStage("sent");
       await onRefresh();
-    } catch (saveError) { reportClientError("today.message.sent", saveError, organizationId); setError(friendlyError(saveError)); }
+    } catch (saveError) {
+      reportClientError("today.message.sent", saveError, organizationId);
+      setError(friendlyError(saveError));
+      await refreshAfterMutationError();
+    }
     finally {
       markSentInFlight.current = false;
       setSendingChannel("");
@@ -325,14 +354,18 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
       await snoozeRecoveryMessage(getSupabase(), organizationId, message.id);
       router.replace("/app/today/?done=snoozed");
       await onRefresh();
-    } catch (saveError) { reportClientError("today.message.snooze", saveError, organizationId); setError(friendlyError(saveError)); }
+    } catch (saveError) {
+      reportClientError("today.message.snooze", saveError, organizationId);
+      setError(friendlyError(saveError));
+      await refreshAfterMutationError();
+    }
     finally { setBusy(false); }
   }
 
-  async function record(type: "interested" | "not_now" | "no_reply" | "dnc") {
+  async function record(type: "interested" | "not_now" | "no_reply" | "dnc", ignoreDateHint = false) {
     if (!message) return;
     if (type === "dnc" && !window.confirm("לסמן שהתקבלה בקשה לא ליצור קשר? החסימה תמנע כל הודעה עתידית מ־Shuv Flow.")) return;
-    if (type === "not_now" && looksLikeDatedFollowUp(response)) {
+    if (type === "not_now" && !ignoreDateHint && looksLikeDatedFollowUp(response)) {
       setShowFollowUpDate(true);
       setError("נראה שהתבקש מועד חזרה. בחרו את התאריך כדי שלא נאבד אותו.");
       return;
@@ -345,7 +378,11 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
       else if (type === "interested") router.replace(`/app/today/?lead=${lead.id}`);
       else router.replace(`/app/today/?done=${type}`);
       await onRefresh();
-    } catch (saveError) { reportClientError("today.response", saveError, organizationId); setError(friendlyError(saveError)); }
+    } catch (saveError) {
+      reportClientError("today.response", saveError, organizationId);
+      setError(friendlyError(saveError));
+      await refreshAfterMutationError();
+    }
     finally { setBusy(false); }
   }
 
@@ -369,12 +406,14 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
     } catch (saveError) {
       reportClientError("today.response.follow-up", saveError, organizationId);
       setError(friendlyError(saveError));
+      await refreshAfterMutationError();
     } finally { setBusy(false); }
   }
 
   return (
     <div className="flow-page flow-page--narrow">
       <PageHeader eyebrow={stage === "sent" ? "עדכון הפנייה" : "אישור הודעה"} title={lead.name} description={lead.service} />
+      {lead.is_demo && <Notice tone="sage"><strong>זו פניית דוגמה.</strong><br />העתקה והסימון כאן הם תרגול בלבד — אין לשלוח את ההודעה לאדם אמיתי.</Notice>}
       {stage !== "sent" && recommendation && <div className="reason-summary"><div><span>למה נעצרה</span><strong>{recommendation.then_text}</strong></div><div><span>למה עכשיו</span><strong>{recommendation.now_text}</strong></div></div>}
 
       {stage === "approve" && <>
@@ -389,9 +428,10 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
       {stage === "copied" && <section className="copied-state">
         <span className="success-seal">✓</span><h2>ההודעה הועתקה.</h2><p>שלחו אותה בערוץ שבו אתם מדברים עם {lead.name.split(" ")[0]}, ואז חזרו לכאן.</p>
         {error && <div className="form-error" role="alert">{error}</div>}
-        <div className="channel-actions"><button onClick={() => markSent("whatsapp")} disabled={busy}>{sendingChannel === "whatsapp" ? "שומרים…" : "שלחתי ב־WhatsApp"}</button><button onClick={() => markSent("sms")} disabled={busy}>{sendingChannel === "sms" ? "שומרים…" : "שלחתי בהודעה"}</button><button onClick={() => markSent("email")} disabled={busy}>{sendingChannel === "email" ? "שומרים…" : "שלחתי באימייל"}</button></div>
+        <div className="channel-actions">{lead.phone && <button onClick={() => markSent("whatsapp")} disabled={busy}>{sendingChannel === "whatsapp" ? "שומרים…" : "שלחתי ב־WhatsApp"}</button>}{lead.phone && <button onClick={() => markSent("sms")} disabled={busy}>{sendingChannel === "sms" ? "שומרים…" : "שלחתי בהודעה"}</button>}{lead.email && <button onClick={() => markSent("email")} disabled={busy}>{sendingChannel === "email" ? "שומרים…" : "שלחתי באימייל"}</button>}</div>
         <details><summary>ההעתקה לא עבדה?</summary><p className="manual-copy" onClick={() => window.getSelection()?.selectAllChildren(document.querySelector(".manual-copy")!)}>{body}</p></details>
-        <button className="text-button" onClick={() => router.push("/app/today/")} disabled={busy}>אעשה את זה אחר כך</button>
+        <button className="text-button" onClick={() => setStage("approve")} disabled={busy}>עריכה והעתקה מחדש</button>
+        <button className="text-button" onClick={snoozeMessage} disabled={busy}>לא לשלוח כרגע</button>
       </section>}
 
       {stage === "sent" && <section className="response-panel">
@@ -401,9 +441,10 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
           <label><span>באיזה תאריך ביקשו שנחזור?</span><input type="date" value={followUpDate} min={clinicDateInputValue()} max={clinicDateInputValue(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000))} onChange={(event) => setFollowUpDate(event.target.value)} /></label>
           <button className="button button--wide" onClick={saveFollowUpRequest} disabled={busy}>{busy ? "שומרים את המועד…" : "שמירת מועד החזרה"}</button>
           <button className="text-button" onClick={() => { setShowFollowUpDate(false); setError(""); }} disabled={busy}>ביטול</button>
+          <button className="text-button" onClick={() => void record("not_now", true)} disabled={busy}>אין מועד חזרה — שמירה כ„לא כרגע“</button>
         </div>}
         {error && <div className="form-error" role="alert">{error}</div>}
-        {!showFollowUpDate && <div className="quick-actions"><button onClick={() => record("interested")} disabled={busy}>יש עניין מחדש</button><button onClick={() => record("not_now")} disabled={busy}>לא כרגע</button><button onClick={() => { setShowFollowUpDate(true); setError(""); }} disabled={busy}>ביקשו שנחזור בתאריך</button><button onClick={() => record("no_reply")} disabled={busy}>לא התקבלה תשובה</button><button className="danger" onClick={() => record("dnc")} disabled={busy}>לא ליצור קשר</button></div>}
+        {!showFollowUpDate && <div className="quick-actions"><button onClick={() => record("interested")} disabled={busy}>יש עניין מחדש</button><button onClick={() => record("not_now")} disabled={busy}>לא כרגע</button><button onClick={() => { setShowFollowUpDate(true); setError(""); }} disabled={busy}>ביקשו שנחזור בתאריך</button><button onClick={() => record("no_reply")} disabled={busy || Boolean(response.trim())}>לא התקבלה תשובה</button><button className="danger" onClick={() => record("dnc")} disabled={busy}>לא ליצור קשר</button></div>}
       </section>}
     </div>
   );
@@ -418,6 +459,10 @@ function LeadProgress({ lead, outcome, onRefresh }: { lead: Lead; outcome: Outco
   const [error, setError] = useState("");
   const firstName = currentLead.name.split(" ")[0];
 
+  async function refreshAfterMutationError() {
+    try { await onRefresh(); } catch { /* Keep the local error if refresh also fails. */ }
+  }
+
   async function advance(status: "contacted" | "booked" | "closed" | "not_now") {
     setBusy(true); setError("");
     try {
@@ -425,21 +470,31 @@ function LeadProgress({ lead, outcome, onRefresh }: { lead: Lead; outcome: Outco
       if (!result.lead) throw new Error("INVALID_TRANSITION_RESPONSE");
       setCurrentLead(result.lead);
       await onRefresh();
-    } catch (saveError) { reportClientError("today.progress", saveError, organizationId); setError(friendlyError(saveError)); }
+    } catch (saveError) {
+      reportClientError("today.progress", saveError, organizationId);
+      setError(friendlyError(saveError));
+      await refreshAfterMutationError();
+    }
     finally { setBusy(false); }
   }
 
   async function confirmRevenue() {
-    const shekels = Number(amount);
-    if (!Number.isFinite(shekels) || shekels <= 0) { setError("הזינו את הסכום שהתקבל בפועל."); return; }
-    const formatted = new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 0 }).format(shekels);
-    if (!window.confirm(`לאשר שהתקבלה בפועל הכנסה בסך ${formatted}? הסכום יופיע בתוצאות כהכנסה מאושרת.`)) return;
+    const revenueMinor = parseShekelInput(amount);
+    if (revenueMinor === null || revenueMinor <= 0) {
+      setError("הזינו את הסכום שהתקבל בפועל, ללא מפריד אלפים. למשל 1000 או 1250.50.");
+      return;
+    }
+    if (!window.confirm(`לאשר שהתקבלה בפועל הכנסה בסך ₪${formatShekelMinor(revenueMinor)}? הסכום יופיע בתוצאות כהכנסה מאושרת.`)) return;
     setBusy(true); setError("");
     try {
-      await confirmRecoveredRevenue(getSupabase(), organizationId, currentLead.id, Math.round(shekels * 100));
+      await confirmRecoveredRevenue(getSupabase(), organizationId, currentLead.id, revenueMinor);
       router.replace("/app/results/?recovered=1");
       await onRefresh();
-    } catch (saveError) { reportClientError("today.revenue", saveError, organizationId); setError(friendlyError(saveError)); setBusy(false); }
+    } catch (saveError) {
+      reportClientError("today.revenue", saveError, organizationId);
+      setError(friendlyError(saveError));
+      await refreshAfterMutationError();
+    } finally { setBusy(false); }
   }
 
   async function deferUntilTomorrow() {
@@ -458,6 +513,7 @@ function LeadProgress({ lead, outcome, onRefresh }: { lead: Lead; outcome: Outco
     } catch (saveError) {
       reportClientError("today.progress.defer", saveError, organizationId);
       setError(friendlyError(saveError));
+      await refreshAfterMutationError();
     } finally { setBusy(false); }
   }
 
@@ -465,11 +521,13 @@ function LeadProgress({ lead, outcome, onRefresh }: { lead: Lead; outcome: Outco
   return (
     <div className="flow-page flow-page--narrow">
       <PageHeader eyebrow="פנייה חזרה" title="הפנייה חזרה להתעניין" description={`${firstName} · ${currentLead.service}`} />
+      {currentLead.is_demo && <Notice tone="sage"><strong>זו פניית דוגמה.</strong><br />הפעולות במסלול הזה הן תרגול ואינן נספרות בתוצאות המרפאה.</Notice>}
       <div className="positive-reply"><span>“</span><p>{currentLead.response_text || outcome?.response_text || "הפנייה חזרה להתעניין."}</p></div>
-      {status === "interested" && <section className="next-step"><span>הצעד הבא לצוות</span><h2>ליצור קשר ולקבוע תור.</h2><p>Shuv Flow לא יוצר קשר במקומכם — רק מוודא שהמשך הטיפול בפנייה לא מתפספס.</p><button className="button button--wide" onClick={() => advance("contacted")} disabled={busy}>סימון שיצרנו קשר</button></section>}
-      {status === "contacted" && <section className="next-step"><span>מה הוחלט לגבי {firstName}?</span><h2>האם נקבע תור?</h2><div className="split-actions"><button className="button" onClick={() => advance("booked")} disabled={busy}>נקבע תור</button><button className="button button--secondary" onClick={() => advance("not_now")} disabled={busy}>לא נסגר</button></div></section>}
+      {status === "interested" && <section className="next-step"><span>הצעד הבא לצוות</span><h2>ליצור קשר ולקבוע תור.</h2><p>Shuv Flow לא יוצר קשר במקומכם — רק מוודא שהמשך הטיפול בפנייה לא מתפספס.</p><button className="button button--wide" onClick={() => advance("contacted")} disabled={busy}>{busy ? "שומרים…" : "סימון שיצרנו קשר"}</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>לטיפול מחר</button><button className="text-button" onClick={() => advance("not_now")} disabled={busy}>לא מתקדם כרגע</button></section>}
+      {status === "contacted" && <section className="next-step"><span>מה הוחלט לגבי {firstName}?</span><h2>האם נקבע תור?</h2><div className="split-actions"><button className="button" onClick={() => advance("booked")} disabled={busy}>{busy ? "שומרים…" : "נקבע תור"}</button><button className="button button--secondary" onClick={() => advance("not_now")} disabled={busy}>לא נסגר</button></div><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>להמשיך לטפל מחר</button></section>}
       {status === "booked" && <section className="next-step"><span>התור נקבע</span><h2>האם העסקה נסגרה?</h2><p>סמנו רק אחרי שיש אישור אמיתי מהצוות.</p><button className="button button--wide" onClick={() => advance("closed")} disabled={busy}>כן, נסגרה</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>{busy ? "שומרים…" : "עדיין לא — לבדוק שוב מחר"}</button></section>}
-      {status === "closed" && <section className="revenue-confirm"><span>אישור ידני בלבד</span><h2>האם התקבלה הכנסה?</h2><p>רק סכום שמישהו מהצוות מאשר יופיע בתוצאות.</p><label><span>הסכום שהתקבל</span><div className="money-input"><b><bdi dir="ltr">₪</bdi></b><input type="number" min="1" step="1" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></div></label><button className="button button--wide" onClick={confirmRevenue} disabled={busy}>אישור הכנסה</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>{busy ? "שומרים…" : "עדיין לא התקבלה — לבדוק שוב מחר"}</button></section>}
+      {status === "closed" && currentLead.is_demo && <section className="next-step"><span>תרגול בלבד</span><h2>מסלול הדוגמה הושלם.</h2><p>ראיתם את כל הדרך מסיבה אמיתית לפנייה ועד סגירה. בפניית דוגמה לא מאשרים הכנסה ושום סכום לא נספר.</p><button className="button button--wide" onClick={() => router.replace("/app/today/?done=demo")}>חזרה למסך היום</button></section>}
+      {status === "closed" && !currentLead.is_demo && <section className="revenue-confirm"><span>אישור ידני בלבד</span><h2>האם התקבלה הכנסה?</h2><p>רק סכום שמישהו מהצוות מאשר יופיע בתוצאות.</p><label><span>הסכום שהתקבל</span><div className="money-input"><b><bdi dir="ltr">₪</bdi></b><input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="1000 או 1250.50" disabled={busy} /></div></label><button className="button button--wide" onClick={confirmRevenue} disabled={busy}>{busy ? "שומרים את האישור…" : "אישור הכנסה"}</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>{busy ? "שומרים…" : "עדיין לא התקבלה — לבדוק שוב מחר"}</button></section>}
       {error && <div className="form-error" role="alert">{error}</div>}
     </div>
   );
@@ -510,8 +568,8 @@ export function Today() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const queryKey = search.toString();
 
-  const load = useCallback(async () => {
-    setStatus("loading");
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setStatus("loading");
     try {
       const client = getSupabase();
       await reconcileStaleWork(client, organizationId);
@@ -524,10 +582,25 @@ export function Today() {
 
       setData({ leads, recommendations, messages, outcomes });
       setStatus("ready");
-    } catch (loadError) { reportClientError("today.load", loadError, organizationId); setStatus("error"); }
+    } catch (loadError) {
+      reportClientError("today.load", loadError, organizationId);
+      if (!silent) setStatus("error");
+    }
   }, [organizationId]);
 
   useEffect(() => { void load(); }, [load, queryKey]);
+  useEffect(() => {
+    const refresh = () => { void load(true); };
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    const interval = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [load]);
   const services = useMemo(() => Array.from(new Set([clinic?.main_service || "", ...(data?.leads.map((lead) => lead.service) || [])])).filter(Boolean), [clinic, data]);
   const branches = useMemo(() => Array.from(new Set(data?.leads.map((lead) => lead.branch).filter((branch): branch is string => Boolean(branch)) || [])), [data]);
 
@@ -610,10 +683,17 @@ export function Today() {
   }
 
   const activeRecommendationIds = new Set(data.recommendations.filter((item) => isRecommendationActive(item)).map((item) => item.id));
-  const activePositiveQueue = orderRecoveryProgressQueue(data.leads.filter((lead) => (
+  const respondedAtByLead = new Map(data.outcomes.map((outcome) => [outcome.lead_id, outcome.responded_at || outcome.updated_at]));
+  const positiveCandidates = data.leads.filter((lead) => (
     canShowRecoveryProgress(lead)
+    && !(lead.is_demo && lead.status === "closed")
     && !data.outcomes.find((outcome) => outcome.lead_id === lead.id)?.revenue_confirmed_at
-  )));
+  )).sort((left, right) => {
+    const rightTime = new Date(respondedAtByLead.get(right.id) || right.updated_at).getTime();
+    const leftTime = new Date(respondedAtByLead.get(left.id) || left.updated_at).getTime();
+    return rightTime - leftTime;
+  });
+  const activePositiveQueue = orderRecoveryProgressQueue(positiveCandidates);
   const activePositive = activePositiveQueue[0];
   const unsentMessages = data.messages.filter((message) => pendingMessageStatuses.has(message.status) && activeRecommendationIds.has(message.recommendation_id));
   const sentMessages = data.messages.filter((message) => {

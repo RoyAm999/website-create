@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createChangeAndMatch, importLeads, loadDemoLeads } from "../lib/data";
+import { createChangeAndMatch, importLeads, importLeadsWithSummary, loadDemoLeads } from "../lib/data";
 import type { BusinessChange, ImportLead, Lead, Recommendation } from "../lib/types";
 
 interface RpcCall {
@@ -46,6 +46,16 @@ test("bulk import is one tenant-scoped RPC after deterministic consolidation", a
   assert.equal(rows[0].external_ref, "csv:phone:0500000000");
 });
 
+test("summary import preserves exact inserted, updated and unchanged counts", async () => {
+  const calls: RpcCall[] = [];
+  const stored = [{ id: "lead-1", name: "נועה" }] as Lead[];
+  const result = { leads: stored, inserted: 0, updated: 1, unchanged: 2 };
+
+  assert.deepEqual(await importLeadsWithSummary(importClient(result, calls), "org-1", [input()]), result);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, "sf_import_leads");
+});
+
 test("demo load uses the same atomic import path and always supplies stable identities", async () => {
   const calls: RpcCall[] = [];
   const stored = Array.from({ length: 20 }, (_, index) => ({ id: `lead-${index + 1}` })) as Lead[];
@@ -61,6 +71,10 @@ test("demo load uses the same atomic import path and always supplies stable iden
 test("import rejects malformed transactional responses", async () => {
   await assert.rejects(
     importLeads(importClient({ inserted: 1 }, []), "org-1", [input()]),
+    /INVALID_IMPORT_RESPONSE/,
+  );
+  await assert.rejects(
+    importLeads(importClient({ leads: [], inserted: 1, updated: -1, unchanged: 0 }, []), "org-1", [input()]),
     /INVALID_IMPORT_RESPONSE/,
   );
 });

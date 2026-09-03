@@ -36,5 +36,5 @@ export function EmptyState({ title, children, action }: { title: string; childre
 }
 
 export function Notice({ children, tone = "sage" }: { children: ReactNode; tone?: "sage" | "warning" | "success" }) {
-  return <div className={`notice notice--${tone}`}>{children}</div>;
+  return <div className={`notice notice--${tone}`} role="status" aria-live="polite">{children}</div>;
 }

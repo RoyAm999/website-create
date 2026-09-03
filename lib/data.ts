@@ -24,6 +24,7 @@ export interface WorkspaceContext {
   user: User;
   organizationId: string;
   clinic: Clinic | null;
+  role: "owner" | "admin" | "operator" | null;
 }
 
 function throwIfError(error: { message: string } | null) {
@@ -37,13 +38,13 @@ export async function currentWorkspace(client: SupabaseClient): Promise<Workspac
 
   const { data: membership, error: membershipError } = await client
     .from("shuv_memberships")
-    .select("organization_id, joined_at")
+    .select("organization_id, joined_at, role")
     .eq("user_id", userData.user.id)
     .order("joined_at", { ascending: true })
     .limit(1)
     .maybeSingle();
   throwIfError(membershipError);
-  if (!membership) return { user: userData.user, organizationId: "", clinic: null };
+  if (!membership) return { user: userData.user, organizationId: "", clinic: null, role: null };
 
   const { data: clinic, error: clinicError } = await client
     .from("sf_clinics")
@@ -55,6 +56,9 @@ export async function currentWorkspace(client: SupabaseClient): Promise<Workspac
     user: userData.user,
     organizationId: membership.organization_id,
     clinic: (clinic as Clinic | null) ?? null,
+    role: membership.role === "owner" || membership.role === "admin" || membership.role === "operator"
+      ? membership.role
+      : null,
   };
 }
 
@@ -80,6 +84,7 @@ export async function bootstrapClinic(
   return {
     user: userData.user,
     organizationId,
+    role: "owner",
     clinic: {
       organization_id: organizationId,
       clinic_name: clinicName.trim(),
@@ -120,7 +125,7 @@ export async function loadDemoLeads(client: SupabaseClient, organizationId: stri
   return importLeadRows(client, organizationId, rows);
 }
 
-interface ImportResult {
+export interface ImportResult {
   leads: Lead[];
   inserted: number;
   updated: number;
@@ -128,10 +133,21 @@ interface ImportResult {
 }
 
 function importResult(data: unknown): ImportResult {
-  if (!data || typeof data !== "object" || !Array.isArray((data as ImportResult).leads)) {
+  const result = data as Partial<ImportResult> | null;
+  if (
+    !result
+    || typeof result !== "object"
+    || !Array.isArray(result.leads)
+    || !Number.isInteger(result.inserted)
+    || !Number.isInteger(result.updated)
+    || !Number.isInteger(result.unchanged)
+    || Number(result.inserted) < 0
+    || Number(result.updated) < 0
+    || Number(result.unchanged) < 0
+  ) {
     throw new Error("INVALID_IMPORT_RESPONSE");
   }
-  return data as ImportResult;
+  return result as ImportResult;
 }
 
 async function importLeadRows(
@@ -139,12 +155,20 @@ async function importLeadRows(
   organizationId: string,
   rows: ReturnType<typeof toLeadRow>[],
 ): Promise<Lead[]> {
+  return (await importLeadRowsWithSummary(client, organizationId, rows)).leads;
+}
+
+async function importLeadRowsWithSummary(
+  client: SupabaseClient,
+  organizationId: string,
+  rows: ReturnType<typeof toLeadRow>[],
+): Promise<ImportResult> {
   const { data, error } = await client.rpc("sf_import_leads", {
     p_organization_id: organizationId,
     p_leads: rows,
   });
   throwIfError(error);
-  return importResult(data).leads;
+  return importResult(data);
 }
 
 export async function importLeads(
@@ -155,6 +179,16 @@ export async function importLeads(
   const batch = consolidateImportLeads(leads);
   const rows = batch.map((candidate) => toLeadRow(organizationId, candidate.lead, false));
   return importLeadRows(client, organizationId, rows);
+}
+
+export async function importLeadsWithSummary(
+  client: SupabaseClient,
+  organizationId: string,
+  leads: ImportLead[],
+): Promise<ImportResult> {
+  const batch = consolidateImportLeads(leads);
+  const rows = batch.map((candidate) => toLeadRow(organizationId, candidate.lead, false));
+  return importLeadRowsWithSummary(client, organizationId, rows);
 }
 
 export async function finishOnboarding(client: SupabaseClient, organizationId: string) {
@@ -361,6 +395,21 @@ export async function snoozeRecoveryMessage(
   });
   throwIfError(error);
   return transitionResult(data);
+}
+
+export async function dismissRecoveryRecommendation(
+  client: SupabaseClient,
+  organizationId: string,
+  recommendationId: string,
+) {
+  const { data, error } = await client.rpc("sf_dismiss_recovery_recommendation", {
+    p_organization_id: organizationId,
+    p_recommendation_id: recommendationId,
+  });
+  throwIfError(error);
+  const result = transitionResult(data);
+  if (!result.recommendation || !result.lead) throw new Error("INVALID_TRANSITION_RESPONSE");
+  return result as Required<Pick<RecoveryTransition, "recommendation" | "lead">>;
 }
 
 export async function markRecoveryMessageSent(

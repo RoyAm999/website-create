@@ -24,6 +24,8 @@ export function Onboarding() {
   const [summary, setSummary] = useState<Summary | null>(null);
 
   const checkSession = useCallback(async () => {
+    setReady(false);
+    setError("");
     try {
       const client = getSupabase();
       const { data } = await Promise.race([

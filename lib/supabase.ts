@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const DEFAULT_URL = "https://inmftuoucmdypbautxaj.supabase.co";
 const DEFAULT_KEY = "sb_publishable_8xckXSs2OVPl5NmV2GBP0A_j0JrW5Mv";
+const AUTH_STORAGE_KEY = "shuv-flow-session";
 
 let browserClient: SupabaseClient | null = null;
 
@@ -16,7 +17,7 @@ export function getSupabase(): SupabaseClient {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storageKey: "shuv-flow-session",
+      storageKey: AUTH_STORAGE_KEY,
     },
     global: {
       headers: { "x-client-info": "shuv-flow-web/1.0" },
@@ -24,6 +25,22 @@ export function getSupabase(): SupabaseClient {
   });
 
   return browserClient;
+}
+
+export function clearStoredSupabaseSession(): void {
+  browserClient = null;
+  if (typeof window === "undefined") return;
+  try {
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index);
+      if (key === AUTH_STORAGE_KEY || key?.startsWith(`${AUTH_STORAGE_KEY}-`)) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // A full navigation below still clears the in-memory client. Browsers that
+    // disable storage can safely ignore this cleanup attempt.
+  }
 }
 
 export function friendlyError(error: unknown): string {

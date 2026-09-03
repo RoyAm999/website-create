@@ -60,6 +60,7 @@ export interface Lead {
   stopped_reason_text: string;
   preferred_time: string | null;
   requested_contact_after: string | null;
+  next_review_at?: string | null;
   status: LeadStatus;
   response_text: string | null;
   created_at: string;

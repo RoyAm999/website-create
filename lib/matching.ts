@@ -210,7 +210,9 @@ export function canMatchLead(lead: Lead, change: MatchableChange, now = new Date
     const today = localDateTime(now).date;
     // Free-text "call later" is not enough: the promised date must be stored,
     // it must have arrived, and the operator cannot pre-trigger a future date.
+    const scheduledReview = lead.next_review_at ? new Date(lead.next_review_at).getTime() : null;
     if (!requestedDate || !asOfDate || requestedDate > asOfDate || asOfDate > today) return false;
+    if (scheduledReview !== null && (!Number.isFinite(scheduledReview) || scheduledReview > now.getTime())) return false;
   }
 
   return true;

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { getSupabase } from "@/lib/supabase";
+import { clearStoredSupabaseSession, getSupabase } from "@/lib/supabase";
 import { reportClientError } from "@/lib/report-error";
 import { Logo } from "./logo";
 import { useWorkspace, WorkspaceGate } from "./workspace-gate";
@@ -50,10 +50,11 @@ function Shell({ children }: { children: ReactNode }) {
       router.replace("/login/");
     } catch (signOutError) {
       reportClientError("auth.signout", signOutError);
-      // Clear the local session even if the network request failed, so the app
-      // never traps the operator behind an unusable expired session.
-      await getSupabase().auth.signOut({ scope: "local" });
-      router.replace("/login/");
+      // Do not queue a second sign-out behind a request that may be holding the
+      // SDK auth lock. Clear only this app's storage and reload the public
+      // login route so a failed network revoke can never trap the operator.
+      clearStoredSupabaseSession();
+      window.location.replace("/login/");
     }
   }
 

@@ -154,6 +154,8 @@ test("requested-date recovery requires an explicit date that has actually arrive
   assert.equal(canMatchLead(requested, { ...change, starts_at: null }, now), false);
   assert.equal(canMatchLead(lead({ ...requested, requested_contact_after: tomorrow }), change, now), false);
   assert.equal(canMatchLead(lead({ ...requested, requested_contact_after: yesterday }), change, now), true);
+  assert.equal(canMatchLead(lead({ ...requested, requested_contact_after: yesterday, next_review_at: "2026-09-03T10:00:01Z" }), change, now), false);
+  assert.equal(canMatchLead(lead({ ...requested, requested_contact_after: yesterday, next_review_at: "2026-09-03T10:00:00Z" }), change, now), true);
   assert.equal(canMatchLead(lead({ ...requested, requested_contact_after: yesterday }), { ...change, starts_at: `${tomorrow}T12:00:00Z` }, now), false);
 });
 

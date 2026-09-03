@@ -7,6 +7,7 @@ import {
   confirmRecoveredRevenue,
   correctRecoveredRevenue,
   deferRecoveryProgress,
+  dismissRecoveryRecommendation,
   markRecoveryMessageSent,
   prepareRecoveryMessage,
   reconcileStaleWork,
@@ -77,6 +78,7 @@ test("transaction wrappers call the intended RPC with tenant-scoped identifiers"
   await confirmRecoveredRevenue(client, "org-1", "lead-1", 12500);
   await approveRecoveryMessage(client, "org-1", "message-1", "הודעה מאושרת וברורה");
   await deferRecoveryProgress(client, "org-1", "lead-1", "2026-09-10T09:00:00Z");
+  await dismissRecoveryRecommendation(client, "org-1", "recommendation-1");
   await recordFollowUpRequest(client, "org-1", "message-1", "ביקשה שנחזור בשבוע הבא", "2026-09-10");
   await correctRecoveredRevenue(client, "org-1", "outcome-1", 13000, "הסכום הוקלד בטעות");
 
@@ -129,6 +131,13 @@ test("transaction wrappers call the intended RPC with tenant-scoped identifiers"
         p_organization_id: "org-1",
         p_lead_id: "lead-1",
         p_review_at: "2026-09-10T09:00:00Z",
+      },
+    },
+    {
+      name: "sf_dismiss_recovery_recommendation",
+      args: {
+        p_organization_id: "org-1",
+        p_recommendation_id: "recommendation-1",
       },
     },
     {

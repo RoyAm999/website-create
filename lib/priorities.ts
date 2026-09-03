@@ -10,6 +10,7 @@ type PriorityLead = Pick<
   | "needs_fix"
   | "stopped_reason_code"
   | "requested_contact_after"
+  | "next_review_at"
   | "phone"
   | "email"
 >;
@@ -39,6 +40,7 @@ export function isDueRequestedContact(
   timeZone = DEFAULT_CLINIC_TIME_ZONE,
 ): boolean {
   const requestedDate = validDateKey(lead.requested_contact_after);
+  const scheduledReview = lead.next_review_at ? new Date(lead.next_review_at).getTime() : null;
   return lead.status === "watching"
     && !lead.dnc
     && !lead.medical_escalation
@@ -46,7 +48,8 @@ export function isDueRequestedContact(
     && Boolean(lead.phone || lead.email)
     && lead.stopped_reason_code === "requested_date"
     && requestedDate !== null
-    && requestedDate <= dateKeyAt(now, timeZone);
+    && requestedDate <= dateKeyAt(now, timeZone)
+    && (scheduledReview === null || (Number.isFinite(scheduledReview) && scheduledReview <= now.getTime()));
 }
 
 export function dueRequestedContactCount(
