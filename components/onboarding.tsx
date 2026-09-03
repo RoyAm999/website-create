@@ -232,18 +232,22 @@ export function Onboarding() {
             <div><strong>{summary.ready}</strong><span>מוכנות למעקב</span></div>
           </div>
 
-          <div className="import-priority">
-            <p><b>למה הפניות נעצרו?</b></p>
-            {summary.insights.length ? summary.insights.map((insight) => (
-              <p key={insight.label}><strong>{insight.count}</strong> · {insight.label}</p>
-            )) : <p>עדיין אין מספיק מידע כדי לזהות דפוס ברור.</p>}
-          </div>
+          <section className="import-insights" aria-label="למה הפניות נעצרו">
+            <header><span>מה למדנו</span><h2>למה הפניות נעצרו?</h2></header>
+            <div>
+              {summary.insights.length ? summary.insights.map((insight) => (
+                <article key={insight.label}><strong>{insight.count}</strong><span>{insight.label}</span></article>
+              )) : <p>עדיין אין מספיק מידע כדי לזהות דפוס ברור.</p>}
+            </div>
+          </section>
 
           {summary.examples.length > 0 && (
-            <div className="import-promise">
-              <span>→</span>
-              <p><strong>כבר אפשר להבין מה קרה בשיחות.</strong><br />{summary.examples.map((example) => `${example.name}: ${example.reason}`).join(" · ")}</p>
-            </div>
+            <section className="import-examples" aria-label="דוגמאות מהפניות">
+              <span>דוגמאות מהשיחות</span>
+              {summary.examples.map((example) => (
+                <p key={`${example.name}-${example.reason}`}><strong>{example.name}</strong><span>“{example.reason}”</span></p>
+              ))}
+            </section>
           )}
 
           {summary.priority > 0 ? (
