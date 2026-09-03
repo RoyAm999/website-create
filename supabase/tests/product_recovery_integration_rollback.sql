@@ -147,6 +147,17 @@ select set_config(
   true
 );
 
+-- This integration test builds several deliberately malformed fixture rows
+-- directly. Production browsers no longer have these grants; they are added
+-- only inside this rollback-only transaction. Security-boundary permissions
+-- are covered separately by product_recovery_security_boundary_rollback.sql.
+reset role;
+grant insert, update on public.sf_leads to authenticated;
+grant insert, update on public.sf_changes to authenticated;
+grant insert, update on public.sf_recommendations to authenticated;
+grant insert, update on public.sf_messages to authenticated;
+set local role authenticated;
+
 do $integration$
 declare
   v_org constant uuid := 'f1000000-0000-4000-8000-000000000001'::uuid;
@@ -270,9 +281,11 @@ begin
       end if;
   end;
 
-  update public.sf_messages
-     set status = 'copied', copied_at = now()
-   where id = v_message;
+  perform public.sf_approve_recovery_message(
+    v_org,
+    v_message,
+    (select body from public.sf_messages where id = v_message)
+  );
   perform public.sf_mark_recovery_message_sent(v_org, v_message, 'whatsapp');
 
   if (select status from public.sf_leads where id = v_lead) <> 'waiting'
@@ -383,9 +396,11 @@ begin
   select id into strict v_medical_message
     from public.sf_messages
    where recommendation_id = v_medical_recommendation;
-  update public.sf_messages
-     set status = 'copied', copied_at = now()
-   where id = v_medical_message;
+  perform public.sf_approve_recovery_message(
+    v_org,
+    v_medical_message,
+    (select body from public.sf_messages where id = v_medical_message)
+  );
   perform public.sf_mark_recovery_message_sent(
     v_org,
     v_medical_message,

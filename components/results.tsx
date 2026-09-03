@@ -98,7 +98,7 @@ function RealResultRow({
         ) : null}
         {editing ? (
           <form className="reason-editor" onSubmit={submitCorrection}>
-            <p>הסכום הנוכחי: ₪{Math.round((outcome.revenue_minor ?? 0) / 100).toLocaleString("he-IL")}</p>
+            <p>הסכום הנוכחי: <bdi dir="ltr">₪&nbsp;{Math.round((outcome.revenue_minor ?? 0) / 100).toLocaleString("he-IL")}</bdi></p>
             <label>
               <span>הסכום הנכון בשקלים</span>
               <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} autoFocus />
@@ -116,7 +116,7 @@ function RealResultRow({
           </form>
         ) : null}
       </div>
-      <strong>{confirmedRevenue ? `₪${Math.round((outcome.revenue_minor ?? 0) / 100).toLocaleString("he-IL")}` : ""}</strong>
+      <strong>{confirmedRevenue ? <bdi dir="ltr">₪&nbsp;{Math.round((outcome.revenue_minor ?? 0) / 100).toLocaleString("he-IL")}</bdi> : null}</strong>
     </article>
   );
 }
@@ -150,7 +150,7 @@ export function Results() {
   if (status === "error") return <ErrorState onRetry={load} />;
   return (
     <div className="results-page">
-      <header className="list-heading"><div><p>תוצאות אמיתיות בלבד</p><h1>מה חזר בפועל?</h1></div></header>
+      <header className="list-heading"><div><p>תוצאות המרפאה</p><h1>מה חזר בפועל?</h1></div></header>
       {search.get("recovered") ? <Notice tone="success">האישור נשמר. הכנסה אמיתית נספרת רק לאחר אישור ידני; נתוני דוגמה אינם נספרים.</Notice> : null}
       {notice ? <Notice tone="success">{notice}</Notice> : null}
       <section className="funnel" aria-label="משפך תוצאות אמיתיות">
@@ -160,7 +160,7 @@ export function Results() {
         <i aria-hidden="true">←</i>
         <div><span>נסגר</span><strong>{summary.funnel.closed}</strong></div>
         <i aria-hidden="true">←</i>
-        <div className="funnel__revenue"><span>הכנסה שאושרה</span><strong>₪{Math.round(summary.funnel.revenue / 100).toLocaleString("he-IL")}</strong></div>
+        <div className="funnel__revenue"><span>הכנסה שאושרה</span><strong><bdi dir="ltr">₪&nbsp;{Math.round(summary.funnel.revenue / 100).toLocaleString("he-IL")}</bdi></strong></div>
       </section>
       <p className="manual-revenue-note"><span>✓</span> הכנסה מופיעה רק אחרי אישור ידני של הצוות — היא לא מוערכת אוטומטית.</p>
       <section className="result-list-section">

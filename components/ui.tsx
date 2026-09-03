@@ -17,9 +17,9 @@ export function ErrorState({ onRetry, compact = false }: { onRetry?: () => void;
       <span className="state-icon" aria-hidden="true">!</span>
       <div>
         <h2>משהו לא נטען כמו שצריך.</h2>
-        <p>לא נשלחה שום הודעה והמידע שלכם נשמר.</p>
+        <p>שום הודעה לא נשלחת אוטומטית. נסו שוב בעוד רגע.</p>
       </div>
-      {onRetry && <button className="button button--secondary" onClick={onRetry}>נסה שוב</button>}
+      {onRetry && <button className="button button--secondary" onClick={onRetry}>לנסות שוב</button>}
     </div>
   );
 }

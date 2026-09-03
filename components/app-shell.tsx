@@ -73,7 +73,7 @@ function Shell({ children }: { children: ReactNode }) {
       <div className="app-layout">
         <aside className="side-nav" aria-label="ניווט ראשי">
           {nav.map((item) => (
-            <Link key={item.href} href={item.href} className={pathname === item.href.slice(0, -1) || pathname === item.href ? "active" : ""}>
+            <Link key={item.href} href={item.href} className={pathname === item.href.slice(0, -1) || pathname === item.href ? "active" : ""} aria-current={pathname === item.href.slice(0, -1) || pathname === item.href ? "page" : undefined}>
               <NavIcon name={item.icon} />
               <span>{item.label}</span>
             </Link>
@@ -85,7 +85,7 @@ function Shell({ children }: { children: ReactNode }) {
 
       <nav className="bottom-nav" aria-label="ניווט ראשי">
         {nav.map((item) => (
-          <Link key={item.href} href={item.href} className={pathname === item.href.slice(0, -1) || pathname === item.href ? "active" : ""}>
+          <Link key={item.href} href={item.href} className={pathname === item.href.slice(0, -1) || pathname === item.href ? "active" : ""} aria-current={pathname === item.href.slice(0, -1) || pathname === item.href ? "page" : undefined}>
             <NavIcon name={item.icon} />
             <span>{item.label}</span>
           </Link>

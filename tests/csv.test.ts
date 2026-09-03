@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CsvImportError, csvImportErrorMessage, parseCsv } from "../lib/csv";
+import { CsvImportError, csvImportErrorMessage, inferStoppedReason, parseCsv } from "../lib/csv";
+
+test("infers internal stop reasons from the operator's plain-language account", () => {
+  assert.equal(inferStoppedReason("יכולה להגיע רק אחרי 17:00").code, "timing");
+  assert.equal(inferStoppedReason("ביקשה שנחזור אליה בחודש הבא").code, "requested_date");
+  assert.equal(inferStoppedReason("חיפשה אפשרות לתשלומים").code, "payment");
+  assert.equal(inferStoppedReason("לא הייתה זמינות לטיפול").code, "availability");
+  assert.equal(inferStoppedReason("רוצה להתייעץ ולקחת עוד זמן").code, "needs_time");
+  assert.equal(inferStoppedReason("פרטים כלליים בלבד").code, "unknown");
+});
 
 test("imports Hebrew headers and preserves DNC", () => {
   const csv = "שם,טלפון,שירות,שווי,סיבת עצירה,לא ליצור קשר\nנועה,0500000000,טיפול פנים,900,יכולה רק אחרי 17:00,לא\nאיילת,0520000000,טיפול פנים,700,ביקשה לא ליצור קשר,כן";

@@ -2,6 +2,7 @@ import type { ImportLead, StoppedReason } from "./types";
 import { hasConcreteTimingEvidence } from "./matching";
 import {
   hasMedicalEscalation,
+  hasNoContactRequest,
   hasUnspecifiedAvailabilityConstraint,
   importContactIdentity,
   normalizeEmail,
@@ -148,15 +149,24 @@ function parseRecords(input: string): CsvRecord[] {
   return records;
 }
 
-function inferReason(text: string): { code: StoppedReason; label: string } {
+/**
+ * Turn the operator's plain-language account of the last conversation into
+ * the internal stop reason. The UI deliberately does not ask clinic staff to
+ * learn these categories; they only record what the lead actually said.
+ */
+export function inferStoppedReason(text: string): { code: StoppedReason; label: string } {
   const value = text.trim();
   if (!value) return { code: "unknown", label: "לא ידוע למה הפנייה נעצרה" };
-  if (/17|ערב|בוקר|שעה|זמן/i.test(value)) return { code: "timing", label: value };
-  if (/תור|זמינות|פנוי/i.test(value)) return { code: "availability", label: value };
-  if (/מחיר|יקר|תשלום|מימון/i.test(value)) return { code: "price", label: value };
-  if (/שירות|טיפול.*חזר/i.test(value)) return { code: "service", label: value };
-  if (/לחזור|אחרי|תאריך/i.test(value)) return { code: "requested_date", label: value };
-  if (/לא ענה|לא ענתה|אין מענה/i.test(value)) return { code: "no_response", label: value };
+  if (/(?:לא\s+ליצור\s+קשר|לא\s+לפנות|אל\s+תפנו|לא\s+מעוניינ|אין\s+עניין|do\s+not\s+contact|unsubscribe)/i.test(value)) return { code: "not_interested", label: value };
+  if (/(?:בחר(?:ה)?\s+(?:ב)?(?:מרפאה|מקום)\s+אחר|סגר(?:ה)?\s+במקום\s+אחר|מתחרה|competitor)/i.test(value)) return { code: "competitor", label: value };
+  if (/(?:לא\s+ענה|לא\s+ענתה|אין\s+מענה|לא\s+חזר(?:ה)?|no\s+(?:reply|response))/i.test(value)) return { code: "no_response", label: value };
+  if (/(?:(?:ביקש(?:ה)?|סוכם|אמר(?:ה)?)\s+.{0,24}(?:לחזור|שנחזור|נדבר)|(?:לחזור|נחזור|נדבר)\s+(?:אלי[וה]?\s+)?(?:אחרי|ב(?:תאריך|יום|שבוע|חודש))|בתאריך\s+שביקש|במועד\s+שביקש)/i.test(value)) return { code: "requested_date", label: value };
+  if (/(?:17|18|19|20|21|22|ערב|בוקר|צהריים|אחרי\s+העבודה|שעה|יום\s+(?:ראשון|שני|שלישי|רביעי|חמישי|שישי)|זמן\s+לא\s+התאים)/i.test(value)) return { code: "timing", label: value };
+  if (/(?:אפשרות\s+תשלום|תשלומים|פריס|מימון|אשראי)/i.test(value)) return { code: "payment", label: value };
+  if (/(?:מחיר|יקר|תקציב|עלות)/i.test(value)) return { code: "price", label: value };
+  if (/(?:שירות|טיפול)\s+.{0,18}(?:לא\s+היה|לא\s+זמין|הופסק|הוקפא|חזר)/i.test(value)) return { code: "service", label: value };
+  if (/(?:תור|זמינות|פנוי|פנויה)/i.test(value)) return { code: "availability", label: value };
+  if (/(?:לחשוב|להתייעץ|עוד\s+זמן|לא\s+עכשיו|בהמשך)/i.test(value)) return { code: "needs_time", label: value };
   return { code: "unknown", label: value };
 }
 
@@ -197,7 +207,7 @@ export function parseCsv(text: string, fallbackService: string): {
     const data = Object.fromEntries(headers.map((header, cellIndex) => [header, cells[cellIndex] || ""]));
     const requestedContactAfter = normalizeDate(data.requested_contact_after || "");
     const preferredTime = (data.preferred_time || "").trim();
-    let reason = inferReason(data.reason || data.notes || "");
+    let reason = inferStoppedReason(data.reason || data.notes || "");
     // A structured promise to contact on a specific date is stronger than a
     // free-text timing hint. Preserve that commitment as the actionable reason
     // instead of silently downgrading it to a generic hour preference.
@@ -209,8 +219,7 @@ export function parseCsv(text: string, fallbackService: string): {
     const normalizedPhone = normalizePhone(data.phone);
     const normalizedEmail = normalizeEmail(data.email);
     const combinedContext = `${reason.label} ${data.notes || ""}`;
-    const dnc = /^(1|true|yes|כן)$/i.test(data.dnc || "")
-      || /(?:לא\s+ליצור\s+קשר|לא\s+לפנות|אל\s+תפנו|do\s+not\s+contact|unsubscribe)/i.test(combinedContext);
+    const dnc = /^(1|true|yes|כן)$/i.test(data.dnc || "") || hasNoContactRequest(combinedContext);
     const medicalEscalation = hasMedicalEscalation(combinedContext);
     const missingContact = !data.name || (!normalizedPhone && !normalizedEmail);
     const missingDecisionEvidence = !dnc && (

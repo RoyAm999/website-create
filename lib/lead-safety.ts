@@ -137,6 +137,10 @@ export function hasMedicalEscalation(value: string): boolean {
   return hebrewRisk || englishRisk;
 }
 
+export function hasNoContactRequest(value: string): boolean {
+  return /(?:לא\s+ליצור\s+קשר|לא\s+לפנות|אל\s+תפנו|do\s+not\s+contact|unsubscribe)/i.test(value);
+}
+
 export function hasUnspecifiedAvailabilityConstraint(value: string): boolean {
   const text = value.trim().toLocaleLowerCase("he-IL");
   if (!text) return false;

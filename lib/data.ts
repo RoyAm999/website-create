@@ -508,20 +508,10 @@ export async function correctRecoveredRevenue(
   return transitionResult(data);
 }
 
-export async function updateMessage(
-  client: SupabaseClient,
-  id: string,
-  patch: Partial<Pick<OutreachMessage, "body" | "status" | "channel" | "copied_at" | "sent_at">>,
-) {
-  const { data, error } = await client.from("sf_messages").update(patch).eq("id", id).select("*").single();
-  throwIfError(error);
-  return data as OutreachMessage;
-}
-
 export async function updateLead(
   client: SupabaseClient,
   id: string,
-  patch: Partial<Pick<Lead, "name" | "phone" | "email" | "service" | "status" | "response_text" | "dnc" | "medical_escalation" | "stopped_reason_code" | "stopped_reason_text" | "preferred_time" | "requested_contact_after" | "branch" | "needs_fix">>,
+  patch: Partial<Pick<Lead, "name" | "phone" | "email" | "service" | "dnc" | "medical_escalation" | "stopped_reason_code" | "stopped_reason_text" | "preferred_time" | "requested_contact_after" | "branch" | "needs_fix">>,
 ) {
   const { data, error } = await client.from("sf_leads").update(patch).eq("id", id).select("*").single();
   throwIfError(error);

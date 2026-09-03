@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   advanceRecoveryLead,
+  approveRecoveryMessage,
   confirmRecoveredRevenue,
   createChangeAndMatch,
   deferRecoveryProgress,
@@ -15,24 +16,31 @@ import {
   prepareRecoveryMessage,
   recordFollowUpRequest,
   recordRecoveryResponse,
+  reconcileStaleWork,
   snoozeRecoveryMessage,
-  updateLead,
-  updateMessage,
   type NewChangeInput,
 } from "@/lib/data";
 import { reportClientError } from "@/lib/report-error";
 import { dueRequestedContactCount } from "@/lib/priorities";
 import { friendlyError, getSupabase } from "@/lib/supabase";
 import {
+  clinicDateInputValue,
+  clinicDateTimeInputValue,
+  clinicDateToMiddayIso,
+  clinicLocalDateTimeToIso,
+  formatClinicDate,
+  tomorrowClinicMorning,
+} from "@/lib/clinic-time";
+import {
   canShowRecoveryProgress,
   isRecommendationActive,
   nextRecommendationBatch,
   orderRecoveryProgressQueue,
-  planTodayPendingWork,
 } from "@/lib/today-flow";
 import type { ChangeType, Lead, Outcome, OutreachMessage, Recommendation } from "@/lib/types";
 import { useWorkspace } from "./workspace-gate";
 import { EmptyState, ErrorState, Notice, Spinner } from "./ui";
+import { CurrentClinicDate } from "./current-clinic-date";
 
 interface TodayData {
   leads: Lead[];
@@ -43,27 +51,17 @@ interface TodayData {
 
 const pendingMessageStatuses = new Set<OutreachMessage["status"]>(["draft", "copied"]);
 
-const changeOptions: { type: ChangeType; title: string; description: string; icon: string }[] = [
+const changeOptions: { type: Exclude<ChangeType, "other">; title: string; description: string; icon: string }[] = [
   { type: "slot", title: "התפנה תור", description: "תאריך ושעה מסוימים", icon: "◷" },
   { type: "availability", title: "נפתחה זמינות", description: "חלון חדש ביומן", icon: "＋" },
   { type: "service", title: "חזר שירות", description: "טיפול שחזר להיות זמין", icon: "↺" },
   { type: "requested_date", title: "הגיע מועד שביקשו לחזור", description: "בדיקת תאריכי חזרה", icon: "⌁" },
   { type: "payment", title: "אפשרות תשלום חדשה", description: "פריסה או תנאי חדשים", icon: "₪" },
-  { type: "other", title: "משהו אחר", description: "נבדוק בלי לנחש או לשלוח", icon: "…" },
 ];
 
 function formatDate(value: string | null) {
   if (!value) return "לא צוין";
-  return new Intl.DateTimeFormat("he-IL", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(value));
-}
-
-function dateTimeInputValue(value: Date): string {
-  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function dateInputValue(value: Date): string {
-  return dateTimeInputValue(value).slice(0, 10);
+  return formatClinicDate(value, { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 
 function looksLikeDatedFollowUp(value: string): boolean {
@@ -71,21 +69,18 @@ function looksLikeDatedFollowUp(value: string): boolean {
 }
 
 function tomorrowMorning(): string {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(9, 0, 0, 0);
-  return tomorrow.toISOString();
+  return tomorrowClinicMorning();
 }
 
 function PageHeader({ eyebrow, title, description }: { eyebrow?: string; title: string; description?: string }) {
   return <header className="page-heading">{eyebrow && <p>{eyebrow}</p>}<h1>{title}</h1>{description && <span>{description}</span>}</header>;
 }
 
-function ChangeForm({ services, initialType, onDone }: { services: string[]; initialType?: ChangeType; onDone: (changeId: string, count: number, type: ChangeType) => void | Promise<void> }) {
+function ChangeForm({ services, branches, initialType, onDone }: { services: string[]; branches: string[]; initialType?: ChangeType; onDone: (changeId: string, count: number, type: ChangeType) => void | Promise<void> }) {
   const { organizationId, clinic } = useWorkspace();
   const [type, setType] = useState<ChangeType | null>(initialType || null);
   const [service, setService] = useState(clinic?.main_service || services[0] || "");
-  const [startsAt, setStartsAt] = useState(initialType === "requested_date" ? dateInputValue(new Date()) : "");
+  const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [details, setDetails] = useState("");
   const [branch, setBranch] = useState("");
@@ -99,11 +94,11 @@ function ChangeForm({ services, initialType, onDone }: { services: string[]; ini
     setError("");
     try {
       const label = changeOptions.find((option) => option.type === type)?.title || "שינוי חדש";
-      const start = startsAt
-        ? type === "requested_date"
-          ? new Date(`${startsAt}T12:00:00Z`).toISOString()
-          : new Date(startsAt).toISOString()
-        : undefined;
+      const start = type === "requested_date"
+        ? clinicDateToMiddayIso(clinicDateInputValue())
+        : startsAt
+          ? clinicLocalDateTimeToIso(startsAt)
+          : undefined;
       const startDate = start ? new Date(start) : null;
       if ((type === "slot" || type === "availability") && (!startDate || startDate.getTime() <= Date.now())) {
         setError("צריך לבחור מועד עתידי שעדיין אפשר לפעול לפיו.");
@@ -111,7 +106,7 @@ function ChangeForm({ services, initialType, onDone }: { services: string[]; ini
         return;
       }
       const end = type === "availability" && endsAt
-        ? new Date(endsAt).toISOString()
+        ? clinicLocalDateTimeToIso(endsAt)
         : undefined;
       if (type === "availability" && (!end || new Date(end).getTime() <= startDate!.getTime())) {
         setError("סיום חלון הזמינות צריך להיות אחרי ההתחלה.");
@@ -121,7 +116,9 @@ function ChangeForm({ services, initialType, onDone }: { services: string[]; ini
       const fallbackDetails = type === "requested_date"
         ? `הגיע ${formatDate(start || new Date().toISOString())}, המועד שבו ביקשו שנחזור`
         : type === "slot" && start
-          ? `התפנה תור ${new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(start))}`
+          ? `התפנה תור ${formatClinicDate(start, { weekday: "long", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })}`
+          : type === "service"
+            ? `${service} חזר להיות זמין`
           : label;
       const input: NewChangeInput = {
         type,
@@ -160,10 +157,9 @@ function ChangeForm({ services, initialType, onDone }: { services: string[]; ini
   }
 
   const choice = changeOptions.find((option) => option.type === type)!;
-  const needsService = type !== "requested_date" && type !== "other";
-  const needsDate = type === "slot" || type === "availability" || type === "requested_date";
-  const minimumFuture = dateTimeInputValue(new Date(Date.now() + 60_000));
-  const latestRequestedDate = dateInputValue(new Date());
+  const needsService = type !== "requested_date";
+  const needsDate = type === "slot" || type === "availability";
+  const minimumFuture = clinicDateTimeInputValue(new Date(Date.now() + 60_000));
 
   return (
     <div className="flow-page flow-page--narrow">
@@ -171,13 +167,13 @@ function ChangeForm({ services, initialType, onDone }: { services: string[]; ini
       <PageHeader eyebrow="מה השתנה?" title={choice.title} description="רק הפרטים שיעזרו לבדוק התאמה אמיתית." />
       <form className="detail-form" onSubmit={submit}>
         {needsService && <label><span>איזה שירות?</span><select value={service} onChange={(event) => setService(event.target.value)} required>{services.map((item) => <option key={item}>{item}</option>)}</select></label>}
-        {needsDate && <label><span>{type === "requested_date" ? "נכון לאיזה יום?" : "מתי?"}</span><input type={type === "requested_date" ? "date" : "datetime-local"} value={startsAt} min={type === "requested_date" ? undefined : minimumFuture} max={type === "requested_date" ? latestRequestedDate : undefined} onChange={(event) => setStartsAt(event.target.value)} required /></label>}
+        {needsDate && <label><span>מתי?</span><input type="datetime-local" value={startsAt} min={minimumFuture} onChange={(event) => setStartsAt(event.target.value)} required /></label>}
         {type === "availability" && <label><span>עד מתי?</span><input type="datetime-local" value={endsAt} min={startsAt || minimumFuture} onChange={(event) => setEndsAt(event.target.value)} required /></label>}
-        {(type === "payment" || type === "service" || type === "other") && <label><span>{type === "payment" ? "מה אפשר עכשיו?" : type === "service" ? "מה חזר להיות זמין?" : "מה בדיוק קרה?"}</span><textarea value={details} onChange={(event) => setDetails(event.target.value)} minLength={4} required placeholder={type === "payment" ? "למשל: אפשר לפרוס ל־4 תשלומים" : "כתבו במשפט קצר וברור"} /></label>}
-        <label><span>סניף <small>(רשות)</small></span><input value={branch} onChange={(event) => setBranch(event.target.value)} placeholder="רק אם השינוי שייך לסניף מסוים" /></label>
-        {type === "other" && <Notice tone="warning">שינוי חופשי יישמר לבדיקה, אבל לא ייצור הודעה אוטומטית. כדי למצוא התאמה בטוחה, עדיף לבחור תור, זמינות, שירות, מועד חזרה או תשלום.</Notice>}
+        {type === "payment" && <label><span>מה אפשר עכשיו?</span><textarea value={details} onChange={(event) => setDetails(event.target.value)} minLength={4} required placeholder="למשל: אפשר לפרוס ל־4 תשלומים" /></label>}
+        {branches.length > 0 && type !== "requested_date" && <label><span>באיזה סניף?</span><select value={branch} onChange={(event) => setBranch(event.target.value)}><option value="">השינוי אינו מוגבל לסניף</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
+        {type === "requested_date" && <Notice>נבדוק מול התאריך של היום את הפניות שבהן נשמר מועד חזרה מפורש.</Notice>}
         {error && <div className="form-error" role="alert">{error}</div>}
-        <button className="button button--wide" disabled={busy}>{busy ? "בודקים למי זה רלוונטי…" : type === "other" ? "שמירה ובדיקה בטוחה" : "בדיקת הפניות"}</button>
+        <button className="button button--wide" disabled={busy}>{busy ? "בודקים למי זה רלוונטי…" : "בדיקת הפניות"}</button>
       </form>
     </div>
   );
@@ -187,7 +183,7 @@ function EvidenceCard({ recommendation, onPrepare, busy }: { recommendation: Rec
   const lead = recommendation.lead;
   return (
     <article className="evidence-card">
-      <header><div><h3>{lead?.name || "פנייה"}</h3><p>{lead?.service}</p></div>{lead?.value_minor ? <span>שווי אפשרי · ₪{Math.round(lead.value_minor / 100).toLocaleString("he-IL")}</span> : null}</header>
+      <header><div><h3>{lead?.name || "פנייה"}</h3><p>{lead?.service}</p></div>{lead?.value_minor ? <span>שווי אפשרי · <bdi dir="ltr">₪{Math.round(lead.value_minor / 100).toLocaleString("he-IL")}</bdi></span> : null}</header>
       <div className="evidence-line evidence-line--then"><span>אז</span><p>“{recommendation.then_text}”</p></div>
       <div className="evidence-line evidence-line--now"><span>עכשיו</span><p>{recommendation.now_text}</p></div>
       <div className="evidence-conclusion"><span>✓</span><div><strong>לכן</strong><p>יש סיבה אמיתית ליצור קשר מחדש.</p></div></div>
@@ -196,7 +192,8 @@ function EvidenceCard({ recommendation, onPrepare, busy }: { recommendation: Rec
   );
 }
 
-function MatchReview({ data, changeId, changeType, onPrepare }: { data: TodayData; changeId: string; changeType: ChangeType | null; onPrepare: (recommendation: Recommendation) => void }) {
+function MatchReview({ data, changeId, onPrepare }: { data: TodayData; changeId: string; onPrepare: (recommendation: Recommendation) => void }) {
+  const router = useRouter();
   const { organizationId } = useWorkspace();
   const recommendations = data.recommendations.filter((item) => item.change_id === changeId
     && isRecommendationActive(item)
@@ -219,9 +216,13 @@ function MatchReview({ data, changeId, changeType, onPrepare }: { data: TodayDat
 
   return (
     <div className="flow-page">
-      <PageHeader eyebrow="תוצאת הבדיקה" title={recommendations.length ? `ל־${recommendations.length} פניות יש סיבה טובה לפנות עכשיו` : "לא נמצאה סיבה טובה לפנות"} description={`בדקנו ${total} פניות. ${recommendations.length ? `${recommendations.length} קשורות לשינוי הזה.` : "שום הודעה לא נוצרה."}`} />
+      <PageHeader
+        eyebrow="תוצאת הבדיקה"
+        title={recommendations.length === 1 ? "לפנייה אחת יש סיבה טובה לפנות עכשיו" : recommendations.length > 1 ? `ל־${recommendations.length} פניות יש סיבה טובה לפנות עכשיו` : "לא נמצאה סיבה טובה לפנות"}
+        description={`${total === 1 ? "בדקנו פנייה אחת." : `בדקנו ${total} פניות.`} ${recommendations.length === 1 ? "היא קשורה לשינוי הזה." : recommendations.length > 1 ? `${recommendations.length} קשורות לשינוי הזה.` : "שום הודעה לא נוצרה."}`}
+      />
       {error && <div className="form-error" role="alert">{error}</div>}
-      {recommendations.length ? <div className="evidence-list">{recommendations.map((item) => <EvidenceCard key={item.id} recommendation={item} onPrepare={() => void prepare(item)} busy={preparingId === item.id} />)}</div> : changeType === "other" ? <EmptyState title="השינוי נשמר בלי ליצור הודעה."><p>בשינוי חופשי אין מספיק מבנה כדי להוכיח התאמה בטוחה.</p><p>אם מדובר בתור, זמינות, שירות, מועד חזרה או תשלום — בחרו את האפשרות המדויקת ונבדוק שוב.</p></EmptyState> : <EmptyState title="עשינו בדיוק את הדבר הנכון."><p>השינוי הזה לא מספיק רלוונטי לאף פנייה כרגע.</p><p>לא נפנה לאנשים רק כדי “לנסות”.</p></EmptyState>}
+      {recommendations.length ? <div className="evidence-list">{recommendations.map((item) => <EvidenceCard key={item.id} recommendation={item} onPrepare={() => void prepare(item)} busy={preparingId === item.id} />)}</div> : <EmptyState title="עשינו בדיוק את הדבר הנכון." action={<button type="button" className="button button--secondary" onClick={() => router.replace("/app/today/")}>חזרה להיום</button>}><p>השינוי הזה לא מספיק רלוונטי לאף פנייה כרגע.</p><p>לא נפנה לאנשים רק כדי “לנסות”.</p></EmptyState>}
     </div>
   );
 }
@@ -269,8 +270,8 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
         setError("לא הצלחנו להעתיק אוטומטית. הטקסט מסומן — העתיקו אותו ואז לחצו „העתקתי ידנית”.");
         return;
       }
-      const saved = await updateMessage(getSupabase(), message.id, { body, status: "copied", copied_at: new Date().toISOString() });
-      setMessage(saved);
+      const saved = await approveRecoveryMessage(getSupabase(), organizationId, message.id, body);
+      setMessage(saved.message);
       setStage("copied");
     } catch (saveError) { reportClientError("today.message.copy", saveError, organizationId); setError(friendlyError(saveError)); }
     finally { setBusy(false); }
@@ -280,8 +281,8 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
     if (!message) return;
     setBusy(true); setError("");
     try {
-      const saved = await updateMessage(getSupabase(), message.id, { body, status: "copied", copied_at: new Date().toISOString() });
-      setMessage(saved);
+      const saved = await approveRecoveryMessage(getSupabase(), organizationId, message.id, body);
+      setMessage(saved.message);
       setCopyFailed(false);
       setStage("copied");
     } catch (saveError) {
@@ -397,7 +398,7 @@ function Approval({ lead, recommendation, message: initialMessage, outcome, onRe
         <h2>מה קרה?</h2><p>בחרו רק אחרי שיש עדכון אמיתי מהפנייה.</p>
         <label><span>מה נכתב? <small>(אם התקבלה תשובה)</small></span><textarea value={response} onChange={(event) => setResponse(event.target.value)} placeholder="אפשר להדביק כאן את התשובה" /></label>
         {showFollowUpDate && <div className="detail-form">
-          <label><span>באיזה תאריך ביקשו שנחזור?</span><input type="date" value={followUpDate} min={dateInputValue(new Date())} max={dateInputValue(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000))} onChange={(event) => setFollowUpDate(event.target.value)} /></label>
+          <label><span>באיזה תאריך ביקשו שנחזור?</span><input type="date" value={followUpDate} min={clinicDateInputValue()} max={clinicDateInputValue(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000))} onChange={(event) => setFollowUpDate(event.target.value)} /></label>
           <button className="button button--wide" onClick={saveFollowUpRequest} disabled={busy}>{busy ? "שומרים את המועד…" : "שמירת מועד החזרה"}</button>
           <button className="text-button" onClick={() => { setShowFollowUpDate(false); setError(""); }} disabled={busy}>ביטול</button>
         </div>}
@@ -468,7 +469,7 @@ function LeadProgress({ lead, outcome, onRefresh }: { lead: Lead; outcome: Outco
       {status === "interested" && <section className="next-step"><span>הצעד הבא לצוות</span><h2>ליצור קשר ולקבוע תור.</h2><p>Shuv Flow לא יוצר קשר במקומכם — רק מוודא שהמשך הטיפול בפנייה לא מתפספס.</p><button className="button button--wide" onClick={() => advance("contacted")} disabled={busy}>סימון שיצרנו קשר</button></section>}
       {status === "contacted" && <section className="next-step"><span>מה הוחלט לגבי {firstName}?</span><h2>האם נקבע תור?</h2><div className="split-actions"><button className="button" onClick={() => advance("booked")} disabled={busy}>נקבע תור</button><button className="button button--secondary" onClick={() => advance("not_now")} disabled={busy}>לא נסגר</button></div></section>}
       {status === "booked" && <section className="next-step"><span>התור נקבע</span><h2>האם העסקה נסגרה?</h2><p>סמנו רק אחרי שיש אישור אמיתי מהצוות.</p><button className="button button--wide" onClick={() => advance("closed")} disabled={busy}>כן, נסגרה</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>{busy ? "שומרים…" : "עדיין לא — לבדוק שוב מחר"}</button></section>}
-      {status === "closed" && <section className="revenue-confirm"><span>אישור ידני בלבד</span><h2>האם התקבלה הכנסה?</h2><p>רק סכום שמישהו מהצוות מאשר יופיע בתוצאות.</p><label><span>הסכום שהתקבל</span><div className="money-input"><b>₪</b><input type="number" min="1" step="1" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></div></label><button className="button button--wide" onClick={confirmRevenue} disabled={busy}>אישור הכנסה</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>{busy ? "שומרים…" : "עדיין לא התקבלה — לבדוק שוב מחר"}</button></section>}
+      {status === "closed" && <section className="revenue-confirm"><span>אישור ידני בלבד</span><h2>האם התקבלה הכנסה?</h2><p>רק סכום שמישהו מהצוות מאשר יופיע בתוצאות.</p><label><span>הסכום שהתקבל</span><div className="money-input"><b><bdi dir="ltr">₪</bdi></b><input type="number" min="1" step="1" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></div></label><button className="button button--wide" onClick={confirmRevenue} disabled={busy}>אישור הכנסה</button><button className="text-button" onClick={deferUntilTomorrow} disabled={busy}>{busy ? "שומרים…" : "עדיין לא התקבלה — לבדוק שוב מחר"}</button></section>}
       {error && <div className="form-error" role="alert">{error}</div>}
     </div>
   );
@@ -513,24 +514,14 @@ export function Today() {
     setStatus("loading");
     try {
       const client = getSupabase();
-      let [leads, recommendations, messages, outcomes] = await Promise.all([
+      await reconcileStaleWork(client, organizationId);
+      const [leads, recommendations, messages, outcomes] = await Promise.all([
         listLeads(client, organizationId),
         listRecommendations(client, organizationId),
         listMessages(client, organizationId),
         listOutcomes(client, organizationId),
       ]);
 
-      const pendingPlan = planTodayPendingWork(leads, recommendations, messages);
-      const staleMessageIds = new Set(pendingPlan.stalePendingMessageIds);
-      const staleMessages = messages.filter((message) => staleMessageIds.has(message.id));
-      if (staleMessages.length) {
-        await Promise.all(staleMessages.map((message) => updateMessage(client, message.id, { status: "snoozed" })));
-        const resetLeadIds = new Set(pendingPlan.leadIdsToReset);
-        const leadsToReset = leads.filter((lead) => resetLeadIds.has(lead.id));
-        await Promise.all(leadsToReset.map((lead) => updateLead(client, lead.id, { status: "watching" })));
-        messages = messages.map((message) => staleMessages.some((stale) => stale.id === message.id) ? { ...message, status: "snoozed" as const } : message);
-        leads = leads.map((lead) => leadsToReset.some((reset) => reset.id === lead.id) ? { ...lead, status: "watching" as const } : lead);
-      }
       setData({ leads, recommendations, messages, outcomes });
       setStatus("ready");
     } catch (loadError) { reportClientError("today.load", loadError, organizationId); setStatus("error"); }
@@ -538,19 +529,20 @@ export function Today() {
 
   useEffect(() => { void load(); }, [load, queryKey]);
   const services = useMemo(() => Array.from(new Set([clinic?.main_service || "", ...(data?.leads.map((lead) => lead.service) || [])])).filter(Boolean), [clinic, data]);
+  const branches = useMemo(() => Array.from(new Set(data?.leads.map((lead) => lead.branch).filter((branch): branch is string => Boolean(branch)) || [])), [data]);
 
   if (status === "loading") return <Spinner label="בודקים מה דורש תשומת לב…" />;
   if (status === "error" || !data) return <ErrorState onRetry={load} />;
 
   const changeParam = search.get("change");
   const initialChangeType = changeOptions.some((option) => option.type === changeParam) ? changeParam as ChangeType : undefined;
-  if (search.has("change")) return <ChangeForm services={services} initialType={initialChangeType} onDone={async (id, _count, type) => {
+  if (search.has("change")) return <ChangeForm services={services} branches={branches} initialType={initialChangeType} onDone={async (id, _count, type) => {
     setStatus("loading");
     await load();
     router.replace(`/app/today/?matches=${id}&type=${type}`);
   }} />;
   const changeId = search.get("matches");
-  if (changeId) return <MatchReview key={changeId} data={data} changeId={changeId} changeType={search.get("type") as ChangeType | null} onPrepare={async (recommendation) => {
+  if (changeId) return <MatchReview key={changeId} data={data} changeId={changeId} onPrepare={async (recommendation) => {
     if (!isRecommendationActive(recommendation)) {
       router.replace("/app/today/?done=expired");
       return;
@@ -644,13 +636,13 @@ export function Today() {
   else if (dueRequestedContacts) focus = dueRequestedContacts === 1
     ? { count: 1, title: "הגיע המועד שבו ביקשו שנחזור לפנייה אחת.", description: "המועד מבוסס על תאריך מפורש שנשמר. עדיין לא נוצרה הודעה.", action: "בדיקת הפנייה", href: "/app/today/?change=requested_date", tone: "match" }
     : { count: dueRequestedContacts, title: `הגיע המועד שבו ביקשו שנחזור ל־${dueRequestedContacts} פניות.`, description: "המועדים מבוססים על תאריכים מפורשים שנשמרו. עדיין לא נוצרה הודעה.", action: "בדיקת הפניות", href: "/app/today/?change=requested_date", tone: "match" };
-  else if (sentMessages.length) focus = { count: sentMessages.length, title: "כרגע לא צריך לעשות דבר.", description: `${sentMessages.length} פניות ממתינות לתשובה. כשיש עדכון, אפשר לרשום אותו כאן.`, action: "עדכון פנייה", href: `/app/today/?lead=${sentMessages[0].lead_id}`, tone: "waiting" };
+  else if (sentMessages.length) focus = { count: sentMessages.length, title: "כרגע לא צריך לעשות דבר.", description: `${sentMessages.length === 1 ? "פנייה אחת ממתינה" : `${sentMessages.length} פניות ממתינות`} לתשובה. כשיש עדכון, אפשר לרשום אותו כאן.`, action: "עדכון פנייה", href: `/app/today/?lead=${sentMessages[0].lead_id}`, tone: "waiting" };
   else if (!data.leads.length) focus = { title: "כדי להתחיל, העלו פניות שלא נסגרו.", description: "מספיק שם וטלפון או אימייל.", action: "לעמוד הפניות", href: "/app/leads/", tone: "empty" };
-  else focus = { title: "כרגע אין סיבה טובה לפנות לאף אחד.", description: `בדקנו ${data.leads.length} פניות. לא נשלח הודעה רק כי עבר זמן.`, tone: "quiet" };
+  else focus = { title: "כרגע אין סיבה טובה לפנות לאף אחד.", description: `${data.leads.length === 1 ? "בדקנו פנייה אחת." : `בדקנו ${data.leads.length} פניות.`} לא נשלח הודעה רק כי עבר זמן.`, tone: "quiet" };
 
   return (
     <div className="today-page">
-      <header className="today-heading"><p>{new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(new Date())}</p><h1>מה כדאי לעשות עכשיו?</h1></header>
+      <header className="today-heading"><p><CurrentClinicDate /></p><h1>מה כדאי לעשות עכשיו?</h1></header>
       {search.get("welcome") && <Notice tone="success">הפניות נקלטו. עכשיו Shuv Flow מחפש רק סיבות אמיתיות לפעולה.</Notice>}
       {search.get("done") === "expired"
         ? <Notice tone="warning">הסיבה הקודמת כבר אינה בתוקף, ולכן ההודעה נסגרה ולא תישלח.</Notice>

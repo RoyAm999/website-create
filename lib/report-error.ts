@@ -59,11 +59,9 @@ export function reportClientError(scope: string, error: unknown, organizationId?
   if (organizationId) {
     try {
       void getSupabase()
-        .from("sf_activity")
-        .insert({
-          organization_id: organizationId,
-          action: "client_error",
-          details: entry,
+        .rpc("sf_report_client_error", {
+          p_organization_id: organizationId,
+          p_details: entry,
         })
         .then(
           ({ error: logError }) => {
