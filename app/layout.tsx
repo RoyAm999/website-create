@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { ClientErrorObserver } from "@/components/client-error-observer";
 import "./globals.css";
 import "./flow.css";
+import "./guest-fixes.css";
 
 export const metadata: Metadata = {
   title: "Shuv Flow | יודעים למי שווה לחזור היום",

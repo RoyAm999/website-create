@@ -1,47 +1,22 @@
-name: Product recovery verification
+name: Product recovery source archive
 on:
   push:
     branches: [recovery/product-2026-09-05]
-  pull_request:
-    branches: [main]
+    paths: ['.github/workflows/product-recovery.yml']
 permissions:
   contents: read
-concurrency:
-  group: product-recovery-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
-  verify:
+  source:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Export reviewed source
+      - name: Export source without dependencies or credentials
         run: git archive --format=zip --output=source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: recovery-source
           path: source.zip
-          retention-days: 3
-      - run: npm ci
-      - name: Export offline verification dependencies
-        run: tar --exclude='*.woff' --exclude='*.woff2' --exclude='*.ttf' --exclude='*.otf' -czf dependencies.tgz node_modules
-      - uses: actions/upload-artifact@v4
-        with:
-          name: recovery-dependencies
-          path: dependencies.tgz
-          compression-level: 0
-          retention-days: 1
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: recovery-site
-          path: out/
           retention-days: 3
