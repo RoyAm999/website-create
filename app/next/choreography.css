@@ -1,0 +1,12 @@
+/* The request replaces the question cards as an opaque paper plane.
+   Avoid fading both text planes through each other at the midpoint. */
+@media (min-width: 760px) and (prefers-reduced-motion: no-preference) {
+  .nx-assembly .nx-question {
+    opacity: clamp(0, calc((.48 - var(--fold)) * 100), 1);
+  }
+  .nx-assembly .nx-final-sheet {
+    z-index: 2;
+    opacity: 1;
+    clip-path: inset(clamp(0%, calc((.5 - var(--fold)) * 1000%), 100%) 0 0);
+  }
+}
