@@ -1,0 +1,22 @@
+name: Collect pinned design resources
+on:
+  push:
+    branches: [recovery/product-2026-09-05]
+    paths: [.github/workflows/scrollcraft-assets.yml]
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch pinned public design skill without executing its code
+        run: |
+          curl --fail --location --retry 2 https://api.github.com/repos/nateherkai/scroll-craft/tarball/0b816225945e45380397d6a0487efa3c98916858 -o skill.tgz
+          mkdir skill
+          tar -xzf skill.tgz --strip-components=1 -C skill
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-scroll-craft
+          path: skill/
+          retention-days: 3
