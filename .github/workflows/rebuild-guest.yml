@@ -1,0 +1,119 @@
+name: Verify guest-first rebuild
+on:
+  push:
+    branches: [recovery/product-2026-09-05]
+    paths:
+      - '.github/workflows/rebuild-guest.yml'
+      - 'release/manifest.json'
+      - 'app/**'
+      - 'lib/**'
+      - 'components/**'
+      - 'e2e/**'
+      - 'tests/**'
+permissions:
+  contents: write
+concurrency:
+  group: shuvflow-guest-rebuild
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: recovery/product-2026-09-05
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and unpack authored source files
+        shell: python
+        run: |
+          import json,base64,lzma,hashlib,pathlib
+          root=pathlib.Path.cwd()
+          manifest=root/'release/manifest.json'
+          if manifest.exists():
+            m=json.loads(manifest.read_text())
+            assert m['codec']=='lzma-json-base64'
+            assert m['parts']==[f'release/part-{i:02}.b64' for i in range(8)]
+            payload=base64.b64decode(''.join((root/p).read_text().strip() for p in m['parts']),validate=True)
+            assert len(payload)<1000000
+            assert hashlib.sha256(payload).hexdigest()==m['sha256'], 'Transport checksum mismatch'
+            decoded=lzma.decompress(payload,memlimit=256*1024*1024)
+            assert len(decoded)<2000000
+            files=json.loads(decoded)
+            assert set(files)==set(m['allowedPaths'])==set(m['fileHashes'])
+            for name,content in files.items():
+              path=pathlib.PurePosixPath(name)
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0] in ['app','lib','components','tests','e2e','scrollcraft','docs','README.md']
+              assert isinstance(content,str) and hashlib.sha256(content.encode()).hexdigest()==m['fileHashes'][name]
+              dst=root/name
+              assert not dst.is_symlink()
+              dst.parent.mkdir(parents=True,exist_ok=True)
+              dst.write_text(content,encoding='utf-8')
+            for part in m['parts']:
+              (root/part).unlink()
+            manifest.unlink()
+            print('Verified and restored all 17 canonical source files')
+          else:
+            print('Canonical sources already restored; verifying the current revision')
+      - name: Fetch the exact reviewed Scroll Craft engine and MIT license
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/vendor
+          BASE=https://raw.githubusercontent.com/nateherkai/scroll-craft/0b816225945e45380397d6a0487efa3c98916858
+          SKILL=$BASE/plugins/nateherk-design/skills/scroll-craft
+          curl --fail --location --retry 2 "$SKILL/engine/scrollcraft.js" -o public/vendor/scrollcraft.js
+          curl --fail --location --retry 2 "$SKILL/engine/scrollcraft.css" -o public/vendor/scrollcraft.css
+          curl --fail --location --retry 2 "$BASE/LICENSE" -o public/vendor/scrollcraft-LICENSE.txt
+          printf '%s\n' '9246fbe4e240a63cdaf33111edd724ee66118da87dc44af86039b0d1619164a1  public/vendor/scrollcraft.js' 'e19eb3aa73b0944626ca56e6e427c76f44753481e04d60f4bac20e8cf1d7758a  public/vendor/scrollcraft.css' 'dd471a27eca72488a53e6ea6fbe9392d81aa3f01e950e63fe328affb2ddfa6e3  public/vendor/scrollcraft-LICENSE.txt' | sha256sum -c -
+      - name: Commit normal reviewed source files, not a runtime archive
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app lib components tests e2e scrollcraft docs README.md public/vendor release
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: rebuild Shuv Flow with Scroll Craft and a complete local guest workspace'
+            git push origin HEAD:recovery/product-2026-09-05
+          fi
+          git rev-parse HEAD
+      - run: npm ci --no-audit --no-fund
+      - name: Type check and unit tests
+        run: |
+          mkdir -p qa
+          set -o pipefail
+          npm run typecheck 2>&1 | tee qa/typecheck.log
+          npm test 2>&1 | tee qa/unit-tests.log
+      - name: Build production export
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee qa/build.log
+      - name: Install pinned browser verification tools
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Start real HTTP origin
+        run: |
+          python -m http.server 3080 --bind 127.0.0.1 --directory out > /tmp/shuvflow-http.log 2>&1 &
+          for i in $(seq 1 20); do curl --fail --silent http://127.0.0.1:3080/ > /dev/null && break; sleep 1; done
+      - name: Verify desktop, phone and reduced motion in a browser
+        run: python e2e/visual.py
+      - name: Complete guest journey with real storage and clipboard
+        run: python e2e/journey.py
+      - name: Record exact tested revision
+        if: always()
+        run: |
+          mkdir -p qa
+          git rev-parse HEAD > qa/tested-commit.txt
+          cp /tmp/shuvflow-http.log qa/http.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guest-rebuild-proof
+          path: qa/
+          retention-days: 7
