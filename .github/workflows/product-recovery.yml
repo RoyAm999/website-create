@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -27,10 +29,19 @@ jobs:
           path: source.zip
           retention-days: 3
       - run: npm ci
+      - name: Export offline verification dependencies
+        run: tar --exclude='*.woff' --exclude='*.woff2' --exclude='*.ttf' --exclude='*.otf' -czf dependencies.tgz node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-dependencies
+          path: dependencies.tgz
+          compression-level: 0
+          retention-days: 1
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Check optional deployment credential availability
-        env:
-          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
-        run: echo "Configured Vercel deploy credential available = $HAS_VERCEL_TOKEN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-site
+          path: out/
+          retention-days: 3
