@@ -7,3 +7,11 @@
   .sf-table-person small { overflow-wrap: anywhere; }
   .sf-filter-tabs { min-width: 0; max-width: calc(100% + 36px); }
 }
+/* flow.css narrows the main gutter from 18px to 15px below 380px. */
+@media (max-width: 380px) {
+  .sf-filter-tabs {
+    margin-inline: -15px;
+    padding-inline: 15px;
+    max-width: calc(100% + 30px);
+  }
+}
