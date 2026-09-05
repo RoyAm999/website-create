@@ -1,0 +1,18 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DEMO_CONFIG,INITIAL_INPUT,businessPhone,validateConfig,packConfig,unpackConfig,estimate,requestText,whatsappLink} from '../lib/intake';
+const config={...DEMO_CONFIG,name:'עסק בדיקה',phone:'0500000000'}; // Fixture only; never contacted.
+test('normalizes only Israeli mobile business destinations',()=>{assert.equal(businessPhone('050-000-0000'),'972500000000');assert.equal(businessPhone('+972 50 000 0000'),'972500000000');for(const value of ['javascript:alert(1)','https://example.com','1234','0500000000?text=x',''])assert.equal(businessPhone(value),'')});
+test('Unicode public config has a reversible, URL-safe serialization',()=>{const encoded=packConfig(config);assert.match(encoded,/^[\w-]+$/);assert.deepEqual(unpackConfig(encoded),validateConfig(config))});
+test('demo cannot accidentally create a real recipient link',()=>{assert.throws(()=>packConfig(DEMO_CONFIG));assert.throws(()=>whatsappLink('', 'test'))});
+test('price inputs cannot be negative, fractional, infinite or huge',()=>{for(const v of [0,-1,1.5,Infinity,NaN,10001,'100'])assert.throws(()=>validateConfig({...config,seat:v}))});
+test('config strips unused properties instead of passing unsafe fields to UI',()=>{assert.equal('callback' in validateConfig({...config,callback:'javascript:alert(1)'}),false)});
+test('public config validates name and city lengths and counts',()=>{for(const c of [{...config,name:'a'},{...config,name:'abc\nxyz'},{...config,cities:[]},{...config,cities:['x'.repeat(41)]},{...config,cities:['x\ny']},{...config,v:2}])assert.throws(()=>validateConfig(c))});
+test('tampered, oversized or malformed share config fails closed',()=>{for(const v of ['', '***', 'a'.repeat(8001),btoa('{}'),btoa('null')])assert.throws(()=>unpackConfig(v))});
+test('minimum visit applies to the combined basket',()=>{assert.equal(estimate(DEMO_CONFIG,{...INITIAL_INPUT,seats:1}).amount,300);assert.equal(estimate(DEMO_CONFIG,{...INITIAL_INPUT,seats:4,mattresses:2}).amount,800)});
+test('special fabric and outside service area do not receive a made-up quote',()=>{assert.equal(estimate(DEMO_CONFIG,{...INITIAL_INPUT,material:'לא בטוח'}).amount,null);assert.equal(estimate(DEMO_CONFIG,{...INITIAL_INPUT,city:'עיר אחרת'}).amount,null)});
+test('quantity bounds protect arithmetic',()=>{for(const s of [-1,0,9,1.5,NaN])assert.throws(()=>estimate(DEMO_CONFIG,{...INITIAL_INPUT,seats:s}));assert.throws(()=>estimate(DEMO_CONFIG,{...INITIAL_INPUT,mattresses:4}))});
+test('request requires a valid name and preserves pending-estimate caveat',()=>{assert.throws(()=>requestText(DEMO_CONFIG,INITIAL_INPUT));const text=requestText(DEMO_CONFIG,{...INITIAL_INPUT,name:'דנה',notes:'יש כתם'});assert.match(text,/דנה/);assert.match(text,/₪300/);assert.match(text,/לא מחיר מאושר/);assert.match(text,/לא הזמנה סופית/);assert.match(text,/יש כתם/)});
+test('out of area request remains manual and no price is invented',()=>{const text=requestText(DEMO_CONFIG,{...INITIAL_INPUT,name:'דנה',city:'עיר אחרת'});assert.match(text,/ללא אומדן מחיר/);assert.equal(text.includes('₪'),false)});
+test('WhatsApp URL encodes customer text rather than interpreting it as URL options',()=>{const u=new URL(whatsappLink(config.phone,'שלום & ? # test'));assert.equal(u.origin,'https://wa.me');assert.equal(u.pathname,'/972500000000');assert.equal(u.searchParams.get('text'),'שלום & ? # test')});
+test('share configuration never contains customer name or notes',()=>{const decoded=unpackConfig(packConfig(config));assert.deepEqual(Object.keys(decoded).sort(),['v','name','phone','seat','minimum','mattress','cities'].sort());assert.equal('notes' in decoded,false)});

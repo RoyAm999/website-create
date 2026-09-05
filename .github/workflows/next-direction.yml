@@ -1,0 +1,62 @@
+name: Verify isolated request-link direction
+on:
+  push:
+    branches: [experiment/request-link-2026-09-05]
+permissions:
+  contents: read
+concurrency:
+  group: next-direction-acceptance
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck and all retained unit tests
+        run: |
+          mkdir -p qa
+          set -o pipefail
+          npm run typecheck 2>&1 | tee qa/typecheck.log
+          npm test 2>&1 | tee qa/unit-tests.log
+          npm run build 2>&1 | tee qa/build.log
+      - name: Install browser
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Test on a real HTTP origin
+        id: server
+        run: |
+          python -m http.server 3090 --bind 127.0.0.1 --directory out >/tmp/next-http.log 2>&1 &
+          for i in $(seq 1 20); do curl --fail --silent http://127.0.0.1:3090/next/ >/dev/null && break; sleep 1; done
+      - name: Four layouts, scroll states, estimate, owner and customer journey
+        run: python e2e/next-direction.py
+      - name: Retained original guest journey
+        if: (success() || failure()) && steps.server.outcome == 'success'
+        env:
+          SHUV_URL: http://127.0.0.1:3090
+        run: python e2e/journey.py
+      - name: Record exact revision
+        if: always()
+        run: |
+          mkdir -p qa
+          git rev-parse HEAD > qa/tested-commit.txt
+          cp /tmp/next-http.log qa/http.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: next-direction-proof
+          path: qa/
+          retention-days: 7
