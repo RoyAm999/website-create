@@ -1,0 +1,65 @@
+name: Verify public next-direction experiment
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/next-public.yml']
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SHUV_URL: https://shuvflow.vercel.app
+      EXPECTED_COMMIT: 53b761f617d8cdb6ec6127ff367b7cd7528185f2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 53b761f617d8cdb6ec6127ff367b7cd7528185f2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check actual production release anonymously
+        id: public
+        shell: python
+        run: |
+          import json,os,time,urllib.request,urllib.parse,pathlib
+          base=os.environ['SHUV_URL'];expected=os.environ['EXPECTED_COMMIT'];out=pathlib.Path('qa');out.mkdir(exist_ok=True)
+          for attempt in range(30):
+            try:
+              with urllib.request.urlopen(base+'/build-info.json',timeout=20) as r:
+                assert urllib.parse.urlparse(r.url).hostname=='shuvflow.vercel.app'
+                release=json.load(r)
+              assert release['commit']==expected and release['nextDirection'] is True
+              break
+            except Exception as e:
+              if attempt==29:raise
+              print('Waiting for expected public revision:',str(e),flush=True);time.sleep(5)
+          checks=[]
+          for path in ['/','/guest/','/next/','/next/build/','/next/request/']:
+            with urllib.request.urlopen(base+path,timeout=20) as r:
+              assert r.status==200 and urllib.parse.urlparse(r.url).hostname=='shuvflow.vercel.app'
+              checks.append({'path':path,'status':r.status,'url':r.url})
+          (out/'http-public.json').write_text(json.dumps({'release':release,'anonymous':True,'routes':checks},indent=2))
+      - name: Install pinned browser tools
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Chromium public customer and owner flows
+        run: python e2e/next-direction.py
+      - name: WebKit customer and owner flows
+        if: (success() || failure()) && steps.public.outcome == 'success'
+        env:
+          NEXT_BROWSER: webkit
+          NEXT_QA: qa/next-webkit
+        run: python e2e/next-direction.py
+      - name: Keep the original guest product working
+        if: (success() || failure()) && steps.public.outcome == 'success'
+        run: python e2e/journey.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: next-public-proof
+          path: qa/
+          retention-days: 7
