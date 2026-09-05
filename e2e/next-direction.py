@@ -1,3 +1,4 @@
+"""No external messages are sent. Fixture destinations are inspected, never opened."""
 import asyncio,json,os,shutil,re
 from pathlib import Path
 from playwright.async_api import async_playwright,expect
@@ -5,18 +6,23 @@ BASE=os.environ.get('SHUV_URL','http://127.0.0.1:3090').rstrip('/')
 OUT=Path(os.environ.get('NEXT_QA','qa/next'));OUT.mkdir(exist_ok=True,parents=True)
 async def main():
  async with async_playwright() as p:
-  browser=await p.chromium.launch(executable_path=shutil.which('chromium'),headless=True,args=['--no-sandbox'])
+  engine=os.environ.get('NEXT_BROWSER','chromium')
+  browser=await p.webkit.launch(headless=True) if engine=='webkit' else await p.chromium.launch(executable_path=shutil.which('chromium'),headless=True,args=['--no-sandbox'])
   reports=[]
   for label,w,h,reduce in [('desktop',1440,1000,False),('mobile',390,844,False),('small',360,740,False),('reduced',1440,1000,True)]:
    ctx=await browser.new_context(viewport={'width':w,'height':h},reduced_motion='reduce' if reduce else 'no-preference')
    await ctx.add_init_script('Element.prototype.requestPointerLock=function(){};Element.prototype.setPointerCapture=function(){}')
-   page=await ctx.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+   page=await ctx.new_page();page.set_default_timeout(12000);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    await page.goto(BASE+'/next/',wait_until='networkidle')
    await expect(page.locator('h1')).to_contain_text('הלוך־חזור')
    await page.screenshot(path=str(OUT/f'{label}-hero.png'))
+   stages=[]
    for stage in [0,.5,1]:
-    await page.evaluate('(p)=>{const e=document.querySelector(".nx-assembly"),r=e.getBoundingClientRect();scrollTo(0,scrollY+r.top+Math.max(0,(r.height-innerHeight))*p)}',stage)
+    await page.evaluate('(p)=>{const e=document.querySelector(".nx-assembly"),r=e.getBoundingClientRect();scrollTo({top:scrollY+r.top+Math.max(0,(r.height-innerHeight))*p,behavior:"instant"})}',stage)
     await page.wait_for_timeout(250)
+    actual=await page.locator('.nx-assembly').evaluate('e=>Number(e.style.getPropertyValue("--fold"))')
+    if label=='desktop':assert abs(actual-stage)<.02,(stage,actual)
+    stages.append(actual)
     await page.screenshot(path=str(OUT/f'{label}-fold-{stage}.png'))
    await page.locator('#next-demo').scroll_into_view_if_needed();await page.wait_for_timeout(250)
    await page.screenshot(path=str(OUT/f'{label}-demo.png'))
@@ -29,8 +35,13 @@ async def main():
    await page.get_by_label('סוג הריפוד',exact=True).select_option(label='לא בטוח');await expect(page.locator('.nx-estimate')).to_contain_text('צריך בדיקה אישית')
    await page.get_by_label('סוג הריפוד',exact=True).select_option(label='בד רגיל')
    await page.get_by_label('באיזו עיר?',exact=True).select_option(label='עיר אחרת');await expect(page.locator('.nx-estimate')).to_contain_text('צריך בדיקה אישית')
-   await page.get_by_label('באיזו עיר?',exact=True).select_option(label='אשקלון')
+   await page.get_by_label('שם העיר',exact=True).fill('רחובות')
    await page.get_by_label('שם פרטי',exact=True).fill('בדיקה')
+   await page.get_by_role('button',name='לסיכום הבקשה').click()
+   await expect(page.get_by_label('סיכום הבקשה')).to_have_value(re.compile('רחובות'))
+   await expect(page.get_by_label('סיכום הבקשה')).to_have_value(re.compile('ללא אומדן מחיר'))
+   await page.get_by_role('button',name='עריכת הפרטים').click()
+   await page.get_by_label('באיזו עיר?',exact=True).select_option(label='אשקלון')
    await page.get_by_role('button',name='לסיכום הבקשה').click()
    await expect(page.get_by_label('סיכום הבקשה')).to_have_value(re.compile('₪400'))
    assert await page.locator('a[href^="https://wa.me/"]').count()==0
@@ -42,6 +53,7 @@ async def main():
    await page.get_by_role('button',name='יצירת הקישור שלי').click()
    url=await page.get_by_label('הקישור ללקוחות',exact=True).input_value()
    assert url.startswith(BASE+'/next/request/#c=')
+   await page.screenshot(path=str(OUT/f'{label}-builder.png'))
    await page.goto(url,wait_until='networkidle')
    await expect(page.locator('.nx-intake-bar')).to_contain_text('עסק בדיקה')
    await page.get_by_label('שם פרטי',exact=True).fill('בדיקת לקוח')
@@ -52,7 +64,7 @@ async def main():
    assert (await a.get_attribute('href')).startswith('https://wa.me/972500000000?text=')
    requestoverflow=await page.evaluate('document.documentElement.scrollWidth>innerWidth+1')
    await page.goto(BASE+'/next/request/#c=broken',wait_until='networkidle');await expect(page.get_by_role('alert')).to_be_visible()
-   reports.append({'viewport':label,'width':w,'landingOverflow':overflow,'requestOverflow':requestoverflow,'errors':errors,'checks':['direct guest','live estimate','manual review on special material and area','demo has no recipient','public config link','consent gated handoff URL','corrupt link fails closed']})
+   reports.append({'engine':engine,'viewport':label,'width':w,'scrollStages':stages,'landingOverflow':overflow,'requestOverflow':requestoverflow,'errors':errors,'checks':['direct guest','live estimate','manual review on special material and area','actual unlisted city in summary','demo has no recipient','public config link','consent gated handoff URL','corrupt link fails closed']})
    await ctx.close()
   await browser.close()
   (OUT/'report.json').write_text(json.dumps(reports,ensure_ascii=False,indent=2))
