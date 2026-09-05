@@ -1,0 +1,47 @@
+'use client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Brand, Icon } from './ui';
+import { createGuest, exampleChanges, type GuestState } from '@/lib/guest';
+import { canMatchLead } from '@/lib/matching';
+import type { BusinessChange } from '@/lib/types';
+import { clinicLocalDateTimeToIso } from '@/lib/clinic-time';
+import { dated } from '@/lib/guest';
+declare global {interface Window { ScrollCraft?:{ mount:(root:Element,opts?:Record<string,unknown>)=>unknown; }; }}
+const options=[{id:'slot',title:'התפנה תור ערב',icon:'calendar'},{id:'payment',title:'נוספו תשלומים',icon:'file'},{id:'service',title:'השירות חזר',icon:'refresh'}] as const;
+export default function FlowLanding(){
+  const [scenario,setScenario]=useState('slot');
+  const [sample,setSample]=useState<GuestState|null>(null);
+  const [activeName,setActiveName]=useState('');
+  const root=useRef<HTMLDivElement>(null);
+  useEffect(()=>{setSample(createGuest());const mount=()=>{if(root.current&&!root.current.hasAttribute('data-mounted')&&window.ScrollCraft){root.current.setAttribute('data-mounted','true');window.ScrollCraft.mount(root.current);}};
+    if(window.ScrollCraft)mount();else{const s=document.createElement('script');s.src='/vendor/scrollcraft.js';s.async=true;s.onload=mount;document.body.appendChild(s);}
+  },[]);
+  const change=useMemo<BusinessChange|null>(()=>{if(!sample)return null;const list=exampleChanges();if(scenario==='slot')return list[0];if(scenario==='payment')return list[1];return {...list[1],id:'sample-service',type:'service',service:'טיפול לייזר',title:'השירות חזר לפעילות',details:'טיפולי הלייזר חזרו לפעילות, ואפשר לתאם טיפול חדש',ends_at:clinicLocalDateTimeToIso(`${dated(14)}T23:59`)};},[sample,scenario]);
+  const eligible=sample&&change?sample.leads.filter(l=>canMatchLead(l,change)):[];
+  const lead=eligible.find(l=>l.name===activeName)||eligible[0];
+  function choose(value:string){setScenario(value);setActiveName('');}
+  const entry=`/guest/?scenario=${scenario}`;
+  return <div className="sf-site" ref={root}>
+    <a className="sf-skip" href="#main">דלגו לתוכן</a>
+    <header className="sf-nav"><Brand/><nav aria-label="ניווט באתר"><a href="#the-why">למה לחזור</a><a href="#try-it">לראות איך זה עובד</a></nav><a className="sf-btn sf-btn-small" href="/guest/">כניסת אורח <Icon name="arrow" size={17}/></a></header>
+    <main id="main">
+    <section className="sf-hero sf-wrap" data-sc-act="flow">
+      <div className="sf-hero-copy"><span className="sf-label"><span className="sf-dot"/> לפניות שנעצרו. לא להזדמנויות שנגמרו.</span><h1>השיחה נעצרה.<br/><span>הסיפור עוד לא.</span></h1><p className="sf-lede">הפניות שכבר הגיעו למרפאה לא צריכות עוד ״עדיין רלוונטי?״. הן צריכות סיבה טובה לחזור. <strong>Shuv Flow מוצא את הקשר בין מה שעצר אותן, לבין מה שהשתנה עכשיו.</strong></p><div className="sf-hero-actions"><a className="sf-btn sf-btn-large" href="/guest/">בואו נחזיר את השיחה <Icon name="arrow"/></a><a href="#try-it" className="sf-text-link">קודם נראה איך <Icon name="chevron" size={16}/></a></div><p className="sf-micro"><Icon name="shield" size={15}/> נכנסים כאורח. בלי סיסמה, בלי כרטיס אשראי.</p></div>
+      <div className="sf-hero-scene" aria-label="דוגמה לפנייה שחוזרת בזכות תור מתאים">
+        <div className="sf-scene-orbit" data-sc-parallax="-0.035" aria-hidden="true"><div/><div/><div/></div>
+        <div className="sf-old-note" data-sc-parallax="-0.075"><span>מה נשאר מהשיחה</span><p>״יכולה להגיע רק בערב.<br/>תעדכנו אם יתפנה משהו.״</p><small>נועה לוי · פנייה לדוגמה</small></div>
+        <div className="sf-dossier-plane" data-sc-parallax="-0.025"><div className="sf-dossier"><div className="sf-dossier-top"><span className="sf-label">הזדמנות לחזור</span><span className="sf-tiny-dot"/></div><div className="sf-person"><span className="sf-avatar">נל</span><div><h2>נועה לוי</h2><p>התעניינה בטיפול פנים</p></div><span className="sf-badge">יש התאמה</span></div><div className="sf-dossier-reason"><span>אז</span><p>לא היה תור בשעות הערב</p><i/><span>עכשיו</span><p><strong>התפנה תור שמתאים לבקשה שלה</strong></p></div><div className="sf-dossier-bottom"><Icon name="message" size={17}/><span>אותה פנייה. סיבה חדשה לשיחה.</span></div></div></div>
+        <div className="sf-new-note" data-sc-parallax="0.04"><div className="sf-note-icon"><Icon name="calendar" size={22}/></div><div><strong>מחר, 18:30</strong><span>הרגע הנכון לחזור אליה</span></div><Icon name="check" size={17}/></div><span className="sf-scene-caption">המחשה בלבד. אין שליחה אוטומטית.</span>
+      </div>
+    </section>
+    <div className="sf-proof-strip sf-wrap"><span>לא עוד רשימת משימות.</span><div><Icon name="people"/> למי לחזור</div><div><Icon name="spark"/> למה עכשיו</div><div><Icon name="message"/> מה להגיד</div><div><Icon name="chart"/> מה באמת חזר</div></div>
+    <section className="sf-why sf-wrap" id="the-why" data-sc-act="flow"><p className="sf-why-side" data-sc-in>לפעמים הבעיה<br/>היא פשוט התזמון.</p><div data-sc-in><h2>לא צריך להתחיל<br/>כל שיחה <span>מאפס.</span></h2><p>מישהי חיכתה לתור ערב. מישהו ביקש תשלומים. אחרת אמרה ״תחזרו אליי אחרי החופשה״. כשהתנאים משתנים, יש סיבה אמיתית לפתוח את השיחה מחדש.</p><div className="sf-quiet-rule"><Icon name="shield"/><strong>אין סיבה חדשה? לא פונים.</strong><span>גם לדעת למי לא לחזור, זו עבודה טובה.</span></div></div></section>
+    <section className="sf-experiment" id="try-it" data-sc-act="flow"><div className="sf-wrap"><div className="sf-section-heading"><div><span className="sf-label">נסו בעצמכם, כאן</span><h2>דבר אחד השתנה.<br/><span>למי זה משנה?</span></h2></div><p>בחרו מה חדש במרפאה. תראו מי מהפניות לדוגמה באמת מתאימה, ואיך זה הופך לפתיחה אישית של שיחה.</p></div>
+      <div className="sf-match-desk"><aside className="sf-switch-panel"><p className="sf-field-caption">מה השתנה במרפאה?</p><div className="sf-scenario-options" role="group" aria-label="בחירת שינוי לדוגמה">{options.map(o=><button key={o.id} type="button" aria-pressed={scenario===o.id} onClick={()=>choose(o.id)} className={scenario===o.id?'active':''}><Icon name={o.icon}/><span>{o.title}</span><span className="sf-radio-dot"/></button>)}</div><div className="sf-switch-note"><Icon name="shield"/><p>ההתאמות מחושבות לפי השירות, הסיבה והתזמון. לא לפי ניחוש של סיכויי מכירה.</p></div></aside>
+      <div className="sf-match-result" aria-live="polite"><div className="sf-match-toolbar"><span><span className="sf-dot"/> {sample?eligible.length:2} פניות עם סיבה לחזור</span><small>נתוני דוגמה</small></div><div className="sf-match-content"><div className="sf-person-picker">{(eligible.length?eligible:[{id:'p',name:'נועה לוי'}]).map(l=><button type="button" key={l.id} onClick={()=>setActiveName(l.name)} className={lead?.name===l.name?'active':''}><span className="sf-mini-avatar">{l.name.charAt(0)}</span>{l.name}</button>)}</div><div className="sf-proof-pair" key={scenario+activeName}><div><small>מה עצר את השיחה</small><p>{lead?.stopped_reason_text||'יכולה להגיע רק בערב'}</p></div><div><small><Icon name="spark" size={14}/> מה השתנה עכשיו</small><p>{change?.details||'התפנה תור ערב שמתאים לבקשה שלה'}</p></div></div><div className="sf-sample-message"><span><Icon name="message" size={15}/> פתיחה אפשרית לשיחה</span><p>היי {lead?.name.split(' ')[0]||'נועה'}, דיברנו על {lead?.service||'טיפול פנים'}. {scenario==='slot'?'זכרנו שחיפשת תור ערב, ורצינו לעדכן שהתפנה מקום.':scenario==='payment'?'רצינו לעדכן שאפשר עכשיו לחלק את התשלום ל־3 תשלומים ללא תוספת.':'רצינו לעדכן שהשירות חזר ואפשר שוב לתאם טיפול.'} מתאים לך שנבדוק יחד?</p></div><a href={entry} className="sf-text-link">להמשיך עם התרחיש במוצר <Icon name="arrow" size={18}/></a></div></div></div><p className="sf-experiment-caption">זו התנסות מחושבת על נתונים בדויים. שום הודעה לא נשלחת.</p>
+    </div></section>
+    <section className="sf-work sf-wrap" data-sc-act="flow"><div className="sf-work-intro" data-sc-in><h2>מהפנייה שנשכחה,<br/>עד התוצאה<br/><span>שאפשר לספור.</span></h2><p>מסך אחד לעבודה של היום. בלי קמפיינים לבנות ובלי ללמוד מערכת שלמה.</p><a href="/guest/" className="sf-text-link">לפתוח את סביבת האורח <Icon name="arrow"/></a></div><div className="sf-work-steps" data-sc-stagger="90"><article data-sc-in><Icon name="upload"/><div><h3>מכניסים את הפניות</h3><p>מעלים קובץ CSV או מוסיפים פנייה. רואים מראש מה תקין, מה כפול ואיפה חסר מידע.</p></div></article><article data-sc-in><Icon name="spark"/><div><h3>מחברים את הסיבה לרגע</h3><p>מעדכנים מה השתנה במרפאה. מקבלים התאמות עם הסבר שאפשר לבדוק, לא ציון מסתורי.</p></div></article><article data-sc-in><Icon name="message"/><div><h3>מחזירים לשיחה, בשליטה</h3><p>בודקים את ההודעה, שולחים ידנית ומתעדים תשובה. בקשת הסרה או שאלה רפואית עוצרות את התהליך.</p></div></article><article data-sc-in><Icon name="chart"/><div><h3>סופרים רק מה שקרה</h3><p>תשובות, תורים וסגירות בנפרד. הכנסה נרשמת רק אחרי אישור מפורש, לא לפי שווי משוער.</p></div></article></div></section>
+    <section className="sf-close" data-sc-act="flow"><div className="sf-wrap sf-close-inner"><div><span className="sf-label">לפני שרודפים אחרי הפנייה הבאה</span><h2>יש שיחות<br/>ששווה <span>להחזיר.</span></h2></div><div className="sf-close-action"><p>התחילו עם 20 פניות לדוגמה.<br/>בלי לפתוח עוד משתמש.</p><a className="sf-btn sf-btn-light sf-btn-large" href="/guest/">נכנסים כאורח <Icon name="arrow"/></a><small>ההתקדמות נשמרת בדפדפן הזה בלבד.</small></div></div></section>
+    </main><footer className="sf-footer sf-wrap"><Brand/><span>מחזירים פניות למסלול.</span><div><a href="/login/">לחשבון קיים</a><a href="/privacy/">פרטיות ומצב אורח</a></div></footer>
+  </div>;
+}

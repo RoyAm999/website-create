@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { ClientErrorObserver } from "@/components/client-error-observer";
 import "./globals.css";
+import "./flow.css";
 
 export const metadata: Metadata = {
   title: "Shuv Flow | יודעים למי שווה לחזור היום",
-  description: "Shuv Flow עוזר למרפאות לזהות פניות שכדאי לחזור אליהן — רק כשיש סיבה אמיתית.",
+  description: "Shuv Flow עוזר למרפאות לזהות פניות שכדאי לחזור אליהן רק כשיש סיבה אמיתית.",
   icons: { icon: "/shuv-flow-logo.png" },
 };
 

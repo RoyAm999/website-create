@@ -12,6 +12,7 @@ export function AuthPage({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <section className="auth-panel">
+        <div className="sf-auth-guest"><strong>לא צריך לפתוח עוד משתמש.</strong><p>אפשר להיכנס מיד לסביבת אורח. ההתקדמות נשמרת בדפדפן הזה בלבד.</p><a href="/guest/" className="sf-btn">כניסת אורח ללא הרשמה</a></div>
         <Suspense fallback={<div className="state-screen">טוענים…</div>}>{children}</Suspense>
       </section>
     </main>
