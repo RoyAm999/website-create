@@ -1,0 +1,100 @@
+name: Verify public Shuv Flow release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/public-acceptance.yml']
+permissions:
+  contents: read
+jobs:
+  public-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SHUV_URL: https://shuvflow.vercel.app
+      SHUV_SCREENSHOTS: qa
+      EXPECTED_COMMIT: d52415b3625e8c8dee9acb36188614bb52ba63b4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d52415b3625e8c8dee9acb36188614bb52ba63b4
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check permanent public URL without cookies or credentials
+        id: public
+        shell: python
+        run: |
+          import os,json,time,urllib.request,urllib.parse,pathlib
+          base=os.environ['SHUV_URL'];expected=os.environ['EXPECTED_COMMIT'];out=pathlib.Path('qa');out.mkdir(exist_ok=True)
+          for attempt in range(30):
+            try:
+              req=urllib.request.Request(base+'/build-info.json',headers={'User-Agent':'ShuvFlow-Anonymous-Acceptance','Cache-Control':'no-cache'})
+              with urllib.request.urlopen(req,timeout=20) as r:
+                assert urllib.parse.urlparse(r.url).hostname=='shuvflow.vercel.app','Unexpected authentication redirect'
+                release=json.load(r)
+              assert release['commit']==expected and release['guest'] is True,'Waiting for exact release'
+              break
+            except Exception as e:
+              if attempt==29: raise
+              print('Waiting for public release:',str(e),flush=True);time.sleep(5)
+          checks=[]
+          for path in ['/','/guest/','/privacy/','/login/']:
+            with urllib.request.urlopen(base+path,timeout=20) as r:
+              assert r.status==200 and urllib.parse.urlparse(r.url).hostname=='shuvflow.vercel.app'
+              checks.append({'path':path,'status':r.status,'url':r.url})
+          (out/'public-http-report.json').write_text(json.dumps({'release':release,'unauthenticated':True,'routes':checks},indent=2))
+          print(json.dumps({'release':release,'routes':checks},indent=2))
+      - name: Install pinned real-browser tools
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Verify public desktop and phone layouts
+        run: python e2e/visual.py
+      - name: Complete public guest journey without a login
+        if: (success() || failure()) && steps.public.outcome == 'success'
+        run: python e2e/journey.py
+      - name: Verify guest access with the WebKit engine on a phone viewport
+        if: (success() || failure()) && steps.public.outcome == 'success'
+        shell: python
+        run: |
+          import asyncio,json,os,pathlib
+          from playwright.async_api import async_playwright,expect
+          async def main():
+            async with async_playwright() as p:
+              browser=await p.webkit.launch(headless=True)
+              ctx=await browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
+              page=await ctx.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+              base=os.environ['SHUV_URL'];checks=[]
+              await page.goto(base+'/',wait_until='networkidle')
+              await expect(page.get_by_role('heading',level=1)).to_contain_text('השיחה נעצרה')
+              await page.get_by_role('link',name='כניסת אורח',exact=True).click()
+              await page.get_by_role('heading',name='נחזיר היום שיחה טובה.').wait_for()
+              assert 'vercel.com' not in page.url
+              assert await page.locator('.sf-opportunity').count()==4
+              checks.append('phone guest entry and four recommendations without an account')
+              await page.get_by_role('button',name='בדיקת ההודעה').first.click()
+              await expect(page.locator('dialog')).to_be_visible()
+              await page.screenshot(path='qa/webkit-phone-message.png')
+              await page.get_by_role('button',name='סגירה',exact=True).click()
+              await page.goto(base+'/guest/?tab=leads',wait_until='networkidle')
+              await page.get_by_role('heading',name='מאחורי כל פנייה, יש סיפור.').wait_for()
+              assert await page.locator('.sf-lead-row').count()==20
+              await page.get_by_label('חיפוש פניות').fill('נועה')
+              assert await page.locator('.sf-lead-row').count()>=1
+              checks.append('touch dialog and searchable leads')
+              await page.set_viewport_size({'width':360,'height':640})
+              assert not await page.evaluate('document.documentElement.scrollWidth>innerWidth+1')
+              await page.screenshot(path='qa/webkit-narrow-leads.png')
+              checks.append('no horizontal page overflow at 360px')
+              assert not errors,errors
+              pathlib.Path('qa/webkit-report.json').write_text(json.dumps({'engine':'WebKit','checks':checks,'errors':errors},ensure_ascii=False,indent=2))
+              print(json.dumps({'checks':checks,'errors':errors},ensure_ascii=False,indent=2))
+              await browser.close()
+          asyncio.run(main())
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-release-proof
+          path: qa/
+          retention-days: 7
