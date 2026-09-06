@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#050608" />
+  <meta name="description" content="ORBITAL — חוויית חלל קולנועית אינטראקטיבית." />
+  <title>ORBITAL — Beyond Earth</title>
+  <link rel="preload" href="assets/astronaut.webp" as="image" />
+  <link rel="preload" href="assets/earth.webp" as="image" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="cursor-orbit" aria-hidden="true"></div>
+
+  <header class="topbar" id="topbar">
+    <a class="brand" href="#top" aria-label="ORBITAL — חזרה להתחלה">
+      <span class="brand-mark" aria-hidden="true"><i></i></span>
+      <span>ORBITAL</span>
+    </a>
+    <nav class="desktop-nav" aria-label="ניווט ראשי">
+      <a href="#journey">המסע</a>
+      <a href="#suit">החליפה</a>
+      <a href="#destinations">היעדים</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="motion-toggle" type="button" id="motionToggle" aria-pressed="false">תנועה: פועלת</button>
+      <a class="primary-link" href="#journey">צאו למסע <span>↙</span></a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-sticky">
+        <div class="starfield starfield-a" data-depth="0.07"></div>
+        <div class="starfield starfield-b" data-depth="0.14"></div>
+        <img class="earth hero-earth" src="assets/earth.webp" alt="כדור הארץ בחלל" />
+        <div class="earth-glow" aria-hidden="true"></div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">A HUMAN JOURNEY / 01</p>
+          <h1 id="hero-title"><span>BE</span><span>YOND</span></h1>
+          <p class="hero-hebrew">יש עולם שלם.<br />מעבר לעולם שלנו.</p>
+          <p class="hero-note">גללו כדי לעזוב את הקרקע.</p>
+        </div>
+
+        <img class="astronaut" src="assets/astronaut.webp" alt="אסטרונאוט בחליפת חלל לבנה מרחף בחלל" />
+
+        <div class="orbit-line orbit-one" aria-hidden="true"></div>
+        <div class="orbit-line orbit-two" aria-hidden="true"></div>
+        <div class="telemetry telemetry-left" aria-hidden="true">
+          <span>ORBITAL // EXPERIENCE</span>
+          <span>ALTITUDE: CONCEPTUAL</span>
+        </div>
+        <div class="telemetry telemetry-right" aria-hidden="true">
+          <span>SCROLL / DESCENT CONTROL</span>
+          <span>VISUAL DATA — NOT LIVE</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="quiet" id="journey">
+      <div class="section-index">02 — THE SILENCE</div>
+      <div class="quiet-inner reveal-block">
+        <p class="eyebrow">כשאין כבישים, רעש או אופק מוכר</p>
+        <h2>רחוק מהכול.<br /><em>קרוב יותר לעצמנו.</em></h2>
+        <p class="quiet-copy">החלל לא מרגיש גדול בגלל המרחק. הוא מרגיש גדול כי בפעם הראשונה שום דבר לא מסתיר את קנה המידה.</p>
+      </div>
+      <div class="thin-rule"></div>
+    </section>
+
+    <section class="earth-dive" aria-labelledby="earth-dive-title">
+      <div class="earth-dive-sticky">
+        <img src="assets/earth.webp" class="earth-dive-img" alt="כדור הארץ מקרוב" />
+        <div class="earth-dive-vignette" aria-hidden="true"></div>
+        <div class="dive-copy">
+          <p class="eyebrow">03 — BLUE MARBLE</p>
+          <h2 id="earth-dive-title">כל מה שאנחנו מכירים<br /><span>נכנס לפריים אחד.</span></h2>
+          <p>גלילה אחת משנה את קנה המידה — מהחלל השחור אל שכבת האטמוספרה הדקה ששומרת על הכול.</p>
+        </div>
+        <div class="atmosphere-label">ATMOSPHERE / ~VISIBLE EDGE</div>
+      </div>
+    </section>
+
+    <section class="suit" id="suit" aria-labelledby="suit-title">
+      <div class="suit-grid">
+        <div class="suit-copy">
+          <p class="eyebrow">04 — SURVIVAL, WORN</p>
+          <h2 id="suit-title">לא מדים.<br /><span>חללית בגודל של אדם.</span></h2>
+          <p>כל שכבה קיימת מסיבה אחת: להפוך סביבה שאינה מאפשרת חיים למשהו שאפשר לנשום בתוכו.</p>
+          <div class="hotspot-readout" id="hotspotReadout" aria-live="polite">
+            <span class="readout-number">01</span>
+            <div>
+              <strong>מגן הקסדה</strong>
+              <p>שכבות הגנה ואור מסונן מאפשרות לראות גם תחת שמש ישירה וחזקה.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="suit-visual">
+          <div class="suit-halo" aria-hidden="true"></div>
+          <img src="assets/astronaut.webp" alt="תקריב של חליפת אסטרונאוט" />
+          <button class="hotspot active" data-index="01" data-title="מגן הקסדה" data-copy="שכבות הגנה ואור מסונן מאפשרות לראות גם תחת שמש ישירה וחזקה." style="--x:50%;--y:18%" aria-label="מידע על מגן הקסדה"><span></span></button>
+          <button class="hotspot" data-index="02" data-title="מערכת התמיכה" data-copy="מערכת הגב מרכזת אספקה, ויסות וטיפול בסביבה שהגוף עצמו אינו יכול לשרוד בה." style="--x:66%;--y:48%" aria-label="מידע על מערכת התמיכה"><span></span></button>
+          <button class="hotspot" data-index="03" data-title="כפפות לחץ" data-copy="הכפפות הן נקודת המפגש בין אטימה קשיחה לבין הצורך לבצע פעולות מדויקות בידיים." style="--x:24%;--y:55%" aria-label="מידע על כפפות החליפה"><span></span></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="destinations" id="destinations" aria-labelledby="dest-title">
+      <div class="destination-stage" data-destination="earth">
+        <div class="destination-image dest-earth active"></div>
+        <div class="destination-image dest-moon"></div>
+        <div class="destination-image dest-mars"></div>
+        <div class="destination-overlay" aria-hidden="true"></div>
+        <div class="destination-content">
+          <p class="eyebrow">05 — CHOOSE A HORIZON</p>
+          <div class="destination-heading">
+            <h2 id="dest-title">כדור הארץ</h2>
+            <span class="dest-counter">01 / 03</span>
+          </div>
+          <p class="destination-text">המקום שממנו כל מסע מתחיל — והדבר הראשון שנראה אחרת ברגע שמתרחקים ממנו.</p>
+          <div class="destination-tabs" role="tablist" aria-label="בחירת יעד">
+            <button class="dest-tab active" role="tab" aria-selected="true" data-dest="earth">כדור הארץ</button>
+            <button class="dest-tab" role="tab" aria-selected="false" data-dest="moon">הירח</button>
+            <button class="dest-tab" role="tab" aria-selected="false" data-dest="mars">מאדים</button>
+          </div>
+        </div>
+        <div class="dest-coordinate" aria-hidden="true">ORBITAL VISUAL ARCHIVE / SELECTED HORIZON</div>
+      </div>
+    </section>
+
+    <section class="finale" aria-labelledby="finale-title">
+      <img src="assets/moon.webp" alt="אופק ירח עם כדור הארץ מרחוק" />
+      <div class="finale-shade" aria-hidden="true"></div>
+      <div class="finale-copy">
+        <p class="eyebrow">06 — RETURN</p>
+        <h2 id="finale-title">כדי להבין את הבית,<br /><span>לפעמים צריך לצאת ממנו.</span></h2>
+        <a class="finale-cta" href="#top">לצאת שוב למסע <span>↑</span></a>
+      </div>
+      <footer>
+        <span>ORBITAL / 2026</span>
+        <span>Concept imagery created for this experience.</span>
+      </footer>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
