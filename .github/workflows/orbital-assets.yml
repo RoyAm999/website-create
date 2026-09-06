@@ -1,0 +1,53 @@
+name: ORBITAL assets
+on:
+  push:
+    branches: [orbital-space-20260906]
+    paths: ['.github/workflows/orbital-assets.yml']
+permissions:
+  contents: write
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet pillow requests
+      - name: Download only the new site images and encode delivery assets
+        run: |
+          python - <<'PY'
+          import io, os, json, requests
+          from PIL import Image
+          os.makedirs('assets', exist_ok=True)
+          sources = {
+            'astronaut': 'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:5c6f9816-73b8-4b56-b0cc-85b01f0cb079',
+            'earth': 'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:99adf4d2-b3f4-4b0b-b2d3-2fbfb7d78148',
+            'moon': 'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:5cbe18f6-93cd-40d0-ba19-44e82377cd65',
+            'mars': 'https://photoshop-api.adobe.io/v2/short-url/urn:aaid:ps:US:7f709109-a399-454c-873b-b0ddc8451248'
+          }
+          report = {}
+          for name, url in sources.items():
+            response = requests.get(url, timeout=90)
+            response.raise_for_status()
+            im = Image.open(io.BytesIO(response.content))
+            im.load()
+            im.save('assets/' + name + '.webp', 'WEBP', quality=89, method=6)
+            report[name] = {'width':im.width,'height':im.height,'mode':im.mode,'bytes':os.path.getsize('assets/'+name+'.webp')}
+            print(name, report[name])
+          assert Image.open('assets/astronaut.webp').mode == 'RGBA', 'Astronaut cutout must have alpha'
+          open('assets/manifest.json','w').write(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbital-images
+          path: assets/
+          retention-days: 30
+      - name: Preserve the new image assets on the isolated branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/
+          git commit -m 'Preserve ORBITAL cinematic image assets' || exit 0
+          git push origin HEAD:orbital-space-20260906
