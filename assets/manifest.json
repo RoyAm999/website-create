@@ -1,0 +1,26 @@
+{
+  "astronaut": {
+    "width": 1792,
+    "height": 2304,
+    "mode": "RGBA",
+    "bytes": 254970
+  },
+  "earth": {
+    "width": 2048,
+    "height": 2048,
+    "mode": "RGB",
+    "bytes": 260216
+  },
+  "moon": {
+    "width": 2688,
+    "height": 1536,
+    "mode": "RGB",
+    "bytes": 567090
+  },
+  "mars": {
+    "width": 2688,
+    "height": 1536,
+    "mode": "RGB",
+    "bytes": 446440
+  }
+}
