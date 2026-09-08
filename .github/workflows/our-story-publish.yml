@@ -1,0 +1,63 @@
+name: Publish tested Our Story game
+on:
+  push:
+    branches: [our-story-publish-20260908]
+    paths: [.github/workflows/our-story-publish.yml]
+permissions:
+  contents: write
+concurrency:
+  group: our-story-once
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: our-story-publish-20260908
+    steps:
+      - name: Publish the existing tested archive without exposing credentials
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import {generateKeyPairSync,privateDecrypt,createDecipheriv,createHash,randomBytes,constants} from 'node:crypto';
+          const repo=process.env.REPO,branch=process.env.BRANCH;
+          const site='f2d9fce2-ed11-4daa-9529-c99958ee149e';
+          const archiveUrl='https://at.adobe.com/W1rqiFFKMQ4KWh5A';
+          const archiveHash='10d608734333ff4faaee4382aa7424542f079a9e73d0780fca6a7b875420732e';
+          const api='https://api.github.com/repos/'+repo+'/contents/';
+          const headers={'Authorization':'Bearer '+process.env.GH_TOKEN,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};
+          const wait=ms=>new Promise(r=>setTimeout(r,ms));
+          async function read(path){const r=await fetch(api+path+'?ref='+branch,{headers});if(r.status===404)return null;if(!r.ok)throw new Error('Repository read failed '+r.status);const j=await r.json();return {sha:j.sha,value:JSON.parse(Buffer.from(j.content,'base64').toString())};}
+          async function write(path,value){const prior=await read(path);const r=await fetch(api+path,{method:'PUT',headers,body:JSON.stringify({message:'Our Story publication status',branch,content:Buffer.from(JSON.stringify(value,null,2)).toString('base64'),...(prior?{sha:prior.sha}:{})})});if(!r.ok)throw new Error('Repository status write failed '+r.status);}
+          // The private key never leaves this single runner process. Only its PUBLIC key is saved.
+          const {publicKey,privateKey}=generateKeyPairSync('rsa',{modulusLength:3072});
+          const nonce=randomBytes(24).toString('hex');
+          await write('our-story-publication/public-key.json',{publicKey:publicKey.export({type:'spki',format:'pem'}),nonce,runId:process.env.GITHUB_RUN_ID});
+          console.log('Waiting for a sealed, narrowly scoped Netlify deployment capability.');
+          let sealed;
+          for(let i=0;i<180;i++){const value=await read('our-story-publication/sealed-request.json');if(value?.value?.nonce===nonce){sealed=value.value;break;}await wait(4000);}
+          if(!sealed)throw new Error('No authorization received; nothing published.');
+          const key=privateDecrypt({key:privateKey,padding:constants.RSA_PKCS1_OAEP_PADDING,oaepHash:'sha256'},Buffer.from(sealed.key,'base64'));
+          const decipher=createDecipheriv('aes-256-gcm',key,Buffer.from(sealed.iv,'base64'));decipher.setAuthTag(Buffer.from(sealed.tag,'base64'));
+          const request=JSON.parse(Buffer.concat([decipher.update(Buffer.from(sealed.data,'base64')),decipher.final()]).toString());
+          if(request.site!==site||request.nonce!==nonce)throw new Error('Publication scope mismatch');
+          const proxy=new URL(request.proxy);
+          if(proxy.origin!=='https://netlify-mcp.netlify.app'||!/^\/proxy\/[A-Za-z0-9_.-]+$/.test(proxy.pathname)||proxy.search||proxy.hash)throw new Error('Invalid scoped capability');
+          const download=await fetch(archiveUrl,{signal:AbortSignal.timeout(30000)});if(!download.ok)throw new Error('Archive unavailable '+download.status);
+          const bytes=Buffer.from(await download.arrayBuffer());if(createHash('sha256').update(bytes).digest('hex')!==archiveHash)throw new Error('Archive integrity check failed');
+          const form=new FormData();form.append('zip',new Blob([bytes],{type:'application/zip'}),'our-story.zip');form.append('title','Our Story: approved cover, five verified chapters, encrypted private photos');
+          // Exactly one POST. Never automatically retry an uncertain publication request.
+          const response=await fetch(proxy.href+'/api/v1/sites/'+site+'/builds',{method:'POST',headers:{'User-Agent':'netlify-mcp'},body:form,redirect:'error',signal:AbortSignal.timeout(60000)});
+          const result=await response.json();if(!response.ok){await write('our-story-publication/result.json',{state:'failed',status:response.status,error:result.message||result.error||'Publication rejected'});throw new Error('Netlify publication rejected '+response.status);}
+          const build=Array.isArray(result)?result[0]:result;const deployId=build.deploy_id;
+          if(!deployId||!/^[a-zA-Z0-9_-]+$/.test(deployId))throw new Error('No valid deploy ID returned');
+          await write('our-story-publication/result.json',{state:'building',deployId,buildId:build.id,archiveSha256:archiveHash});
+          for(let i=0;i<100;i++){
+            await wait(5000);const r=await fetch(proxy.href+'/api/v1/deploys/'+deployId,{redirect:'error',signal:AbortSignal.timeout(15000)});if(!r.ok)continue;const d=await r.json();
+            if(d.state==='ready'||d.state==='error'){
+              await write('our-story-publication/result.json',{state:d.state,deployId,url:d.ssl_url||d.url,deployUrl:d.deploy_ssl_url||d.deploy_url,error:d.error_message||null,archiveSha256:archiveHash});console.log('Publication settled: '+d.state);if(d.state!=='ready')process.exitCode=1;break;
+            }
+          }
+          NODE
