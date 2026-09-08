@@ -1,0 +1,30 @@
+{
+  "status": 200,
+  "bytes": 1164120,
+  "allGameComponentsMatch": true,
+  "scripts": [
+    {
+      "sha256": "ecb3eb7599018362e095829b6cf285b0e379697c9b5ee5eb3ac8b7c8d811de1f",
+      "openingTag": "<script id=\"media-bundle\" type=\"application/json\">",
+      "length": 1076017
+    },
+    {
+      "sha256": "7fd70e52728f533528311b19bb49da140c1be559d38ad849c0d6b7933eb67977",
+      "openingTag": "<script>",
+      "length": 35440
+    },
+    {
+      "sha256": "c4a398e171a16ea4b56463da52953f5497489415cf7b135bef7a2d2bd1b51058",
+      "openingTag": "<script async src=\"/.netlify/scripts/hud?variant=public\" data-nf-variant=\"public\" data-netlify-site-id=\"f2d9fce2-ed11-4daa-9529-c99958ee149e\" data-app-host=\"app.netlify.com\">",
+      "length": 183
+    }
+  ],
+  "styles": [
+    {
+      "sha256": "715723e7563c9a75fd307ab13288a08057747f51424c2cf739016628a9a7d5a7",
+      "length": 47735
+    }
+  ],
+  "prefix": "<!doctype html>\n<html lang=\"he\" dir=\"rtl\">\n<head>\n<meta charset=\"utf-8\">\n<!-- This site is hosted on Netlify. Anyone can build and deploy a site\n     like this one for free: https://netlify.new/?utm_campaign=ai-legible&utm_source=comment&utm_medium=referral&utm_id=f2d9fce2-ed11-4daa-9529-c99958ee149e\n     Netlify hosting facts for this site: static/SSR served via Netlify Edge. -->\n<meta name=\"hosting-provider\" content=\"Netlify\">\n<meta name=\"netlify-deploy\" content=\"https://netlify.new/?utm_campa",
+  "suffix": "ton></section>`;$('#reload').onclick=()=>location.reload();console.error('Game could not initialize:',e.name);}}\n setInterval(()=>{if(active&&!document.hidden){state.seconds+=5;save();}},5000);\n document.addEventListener('visibilitychange',()=>{if(document.hidden){save();if(audio?.state==='running')audio.suspend().catch(()=>{});}else if(!state.muted&&audio?.state==='suspended'){audio.resume().catch(()=>{});}});\n window.addEventListener('pagehide',save);\n load();\n})();\n</script>\n<noscript><p style=\"padding:30px;color:white\">כדי לשחק, צריך לפתוח את הקובץ בדפדפן עם JavaScript פעיל.</p></noscript>\n</body></html>\n<script async src=\"/.netlify/scripts/hud?variant=public\" data-nf-variant=\"public\" data-netlify-site-id=\"f2d9fce2-ed11-4daa-9529-c99958ee149e\" data-app-host=\"app.netlify.com\"></script>\n"
+}
