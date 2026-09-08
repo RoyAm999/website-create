@@ -1,6 +1,8 @@
 {
-  "state": "building",
+  "state": "ready",
   "deployId": "6aa0010566d9e066bb34010a",
-  "buildId": "6aa0010566d9e066bb340108",
+  "url": "https://our-story-cinematic.netlify.app",
+  "deployUrl": "https://6aa0010566d9e066bb34010a--our-story-cinematic.netlify.app",
+  "error": null,
   "archiveSha256": "10d608734333ff4faaee4382aa7424542f079a9e73d0780fca6a7b875420732e"
 }
