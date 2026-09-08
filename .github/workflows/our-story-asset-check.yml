@@ -1,0 +1,29 @@
+name: Verify exact game assets
+on:
+  push:
+    branches: [our-story-publish-20260908]
+    paths: [.github/workflows/our-story-asset-check.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Compare game components
+        run: |
+          node --input-type=module <<'NODE'
+          import {createHash} from 'node:crypto';
+          const r=await fetch('https://our-story-cinematic.netlify.app/');const h=await r.text();const hash=s=>createHash('sha256').update(s).digest('hex');
+          const scripts=[...h.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/gi)].map(m=>m[0]);const styles=[...h.matchAll(/<style\b[^>]*>[\s\S]*?<\/style>/gi)].map(m=>m[0]);
+          const expected=['ecb3eb7599018362e095829b6cf285b0e379697c9b5ee5eb3ac8b7c8d811de1f','7fd70e52728f533528311b19bb49da140c1be559d38ad849c0d6b7933eb67977','715723e7563c9a75fd307ab13288a08057747f51424c2cf739016628a9a7d5a7'];
+          const found=[...scripts,...styles].map(hash);
+          const report={status:r.status,bytes:Buffer.byteLength(h),allGameComponentsMatch:expected.every(s=>found.includes(s)),scripts:scripts.map(s=>({sha256:hash(s),openingTag:s.match(/^<script[^>]*>/)?.[0],length:Buffer.byteLength(s)})),styles:styles.map(s=>({sha256:hash(s),length:Buffer.byteLength(s)})),prefix:h.slice(0,500),suffix:h.slice(-800)};
+          const headers={'Authorization':'Bearer '+process.env.GH_TOKEN,'Accept':'application/vnd.github+json','Content-Type':'application/json'};
+          const api='https://api.github.com/repos/'+process.env.REPO+'/contents/our-story-publication/asset-check.json';
+          const res=await fetch(api,{method:'PUT',headers,body:JSON.stringify({branch:'our-story-publish-20260908',message:'Record exact hosted component checks',content:Buffer.from(JSON.stringify(report,null,2)).toString('base64')})});
+          console.log(JSON.stringify(report));if(!res.ok||!report.allGameComponentsMatch)process.exitCode=1;
+          NODE
