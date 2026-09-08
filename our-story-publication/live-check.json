@@ -1,0 +1,11 @@
+{
+  "url": "https://our-story-cinematic.netlify.app/",
+  "status": 200,
+  "htmlSha256": "30dce56638985a0930ba256ce0388d3730f691d91c36eb29b0308cc36a18a2d6",
+  "matchesTestedBuild": false,
+  "contentType": "text/html; charset=UTF-8",
+  "robots": "noindex, nofollow, noarchive",
+  "csp": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "plaintextPhotosPresent": false,
+  "browserGateTest": "passed"
+}
