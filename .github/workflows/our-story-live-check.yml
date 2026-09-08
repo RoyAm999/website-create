@@ -1,0 +1,40 @@
+name: Verify live Our Story game
+on:
+  push:
+    branches: [our-story-publish-20260908]
+    paths: [.github/workflows/our-story-live-check.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Check HTTPS game and browser privacy gate
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import {createHash} from 'node:crypto';
+          import {existsSync} from 'node:fs';
+          import {spawnSync} from 'node:child_process';
+          const url='https://our-story-cinematic.netlify.app/';
+          const r=await fetch(url,{redirect:'follow',headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(25000)});
+          const html=await r.text();const hash=createHash('sha256').update(html).digest('hex');
+          const report={url:r.url,status:r.status,htmlSha256:hash,matchesTestedBuild:hash==='91f8ca919fc466f094f99034aedce19abe7eb404962ecd10df38c5cfcbe79a00',contentType:r.headers.get('content-type'),robots:r.headers.get('x-robots-tag'),csp:r.headers.get('content-security-policy'),plaintextPhotosPresent:html.includes('data:image/webp;base64,'),browserGateTest:'not-run'};
+          const executable=['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(existsSync);
+          if(executable){
+            const browser=spawnSync(executable,['--headless','--no-sandbox','--disable-gpu','--dump-dom','--virtual-time-budget=5000',url],{encoding:'utf8',timeout:35000,maxBuffer:6000000});
+            const dom=(browser.stdout||'').replace(/<script\b[\s\S]*?<\/script>/gi,'');
+            report.browserGateTest=dom.includes('זה סיפור פרטי.')&&dom.includes('<section class="locked">')&&!/<img\b/i.test(dom)?'passed':'failed';
+          }
+          const branch='our-story-publish-20260908';const path='our-story-publication/live-check.json';
+          const headers={'Authorization':'Bearer '+process.env.GH_TOKEN,'Content-Type':'application/json','Accept':'application/vnd.github+json'};
+          const api='https://api.github.com/repos/'+process.env.REPO+'/contents/'+path;
+          const old=await fetch(api+'?ref='+branch,{headers});const prior=old.ok?await old.json():null;
+          const saved=await fetch(api,{method:'PUT',headers,body:JSON.stringify({branch,message:'Record live HTTPS and privacy verification',content:Buffer.from(JSON.stringify(report,null,2)).toString('base64'),...(prior?{sha:prior.sha}:{})})});
+          console.log(JSON.stringify(report,null,2));
+          if(!saved.ok||report.status!==200||!report.matchesTestedBuild||report.plaintextPhotosPresent||report.browserGateTest==='failed')process.exitCode=1;
+          NODE
